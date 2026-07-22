@@ -71,6 +71,9 @@ jobs:
       - name: Build
         run: cmake --build build -j"$(nproc)"
 
+      - name: Run self-test
+        run: QT_QPA_PLATFORM=offscreen ./build/sdr-scanner --test
+
       - name: Package
         working-directory: build
         run: cpack
@@ -133,23 +136,14 @@ jobs:
           test -f /usr/share/icons/hicolor/scalable/apps/sdr-scanner.svg
           echo "All expected files present."
 
-      - name: Smoke test (headless)
-        run: |
-          QT_QPA_PLATFORM=offscreen timeout 5 /usr/bin/sdr-scanner
-          code=$?
-          # 124 == killed by `timeout` after running successfully; 0 ==
-          # exited cleanly on its own. Anything else means it crashed or
-          # failed to start (e.g. a missing runtime dependency).
-          if [ "$code" -ne 124 ] && [ "$code" -ne 0 ]; then
-            echo "sdr-scanner exited with unexpected code $code"
-            exit 1
-          fi
-          echo "sdr-scanner ran successfully (exit code $code)."
+      - name: Run self-test on the installed binary
+        run: QT_QPA_PLATFORM=offscreen /usr/bin/sdr-scanner --test
 
-  # Windows build only -- no install-test job. Verifying a silent NSIS
-  # install end-to-end is meaningfully more involved than apt/dnf and
-  # untested here for lack of a Windows environment to validate it
-  # against; per instructions this is fine to skip.
+  # Runs the raw built binary's self-test before packaging, but there's no
+  # separate install-test job like the Linux targets have: verifying a
+  # silent NSIS install end-to-end is meaningfully more involved than
+  # apt/dnf, and untested here for lack of a Windows environment to
+  # validate it against. Per instructions this is fine to skip.
   build-windows:
     name: Build (win)
     runs-on: windows-latest
@@ -158,9 +152,10 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Qt
-        uses: jurplel/install-qt-action@v4
+        uses: jurplel/install-qt-action@v3
         with:
           version: "6.8.*"
+          arch: "win64_msvc2019_64"
           modules: "qtmultimedia"
           cache: true
 
@@ -183,6 +178,13 @@ jobs:
 
       - name: Build
         run: cmake --build build --config Release -j 4
+
+      - name: Run self-test
+        shell: pwsh
+        run: |
+          $qtBin = (Get-Command qmake.exe).Source | Split-Path
+          $env:QT_PLUGIN_PATH = Join-Path (Split-Path $qtBin) "plugins"
+          .\build\Release\sdr-scanner.exe --test
 
       - name: Package
         working-directory: build
