@@ -14,16 +14,17 @@ endif()
 find_package(Qt6 REQUIRED COMPONENTS Widgets Multimedia)
 
 # --- librtlsdr discovery -----------------------------------------------
-# Works with the Debian/Ubuntu package (librtlsdr-dev), Homebrew on macOS,
-# and vcpkg on Windows. vcpkg's "rtlsdr" port ships a CMake package config
-# per its own usage docs -- find_package(rtlsdr CONFIG REQUIRED), target
-# rtlsdr::rtlsdr (or rtlsdr::rtlsdr_static) -- which is a different
-# discovery mechanism than plain find_path/find_library, so it's tried
-# first; pkg-config + find_path/find_library (what the Debian/Homebrew
-# packages provide, no CMake config) is the fallback.
-find_package(rtlsdr CONFIG QUIET)
-
-if(TARGET rtlsdr::rtlsdr)
+# Debian/Ubuntu (librtlsdr-dev) and Homebrew (macOS) provide plain
+# pkg-config + headers/lib with no CMake package config, so that's the
+# only discovery path tried on those platforms -- this is what was already
+# proven working there; no reason to risk it by adding another path.
+#
+# vcpkg's "rtlsdr" port is different: per its own usage docs it does NOT
+# support plain find_path/find_library at all, only a CMake package config
+# (find_package(rtlsdr CONFIG REQUIRED), target rtlsdr::rtlsdr). So on
+# Windows specifically, that's what's used instead.
+if(WIN32)
+    find_package(rtlsdr CONFIG REQUIRED)
     set(RTLSDR_TARGET rtlsdr::rtlsdr)
     message(STATUS "librtlsdr found via CMake package config (rtlsdr::rtlsdr)")
 else()
@@ -42,7 +43,7 @@ else()
     )
 
     if(NOT RTLSDR_INCLUDE_DIR OR NOT RTLSDR_LIBRARY)
-        message(FATAL_ERROR "librtlsdr not found. Install librtlsdr-dev (Linux), 'brew install librtlsdr' (macOS), or the rtlsdr vcpkg port (Windows).")
+        message(FATAL_ERROR "librtlsdr not found. Install librtlsdr-dev (Linux) or 'brew install librtlsdr' (macOS).")
     endif()
 
     message(STATUS "librtlsdr include: ${RTLSDR_INCLUDE_DIR}")
