@@ -15,27 +15,39 @@ find_package(Qt6 REQUIRED COMPONENTS Widgets Multimedia)
 
 # --- librtlsdr discovery -----------------------------------------------
 # Works with the Debian/Ubuntu package (librtlsdr-dev), Homebrew on macOS,
-# and vcpkg on Windows (which installs an rtlsdr-config.cmake / pkgconfig file).
-find_package(PkgConfig QUIET)
-if(PkgConfig_FOUND)
-    pkg_check_modules(PC_RTLSDR QUIET librtlsdr)
+# and vcpkg on Windows. vcpkg's "rtlsdr" port ships a CMake package config
+# per its own usage docs -- find_package(rtlsdr CONFIG REQUIRED), target
+# rtlsdr::rtlsdr (or rtlsdr::rtlsdr_static) -- which is a different
+# discovery mechanism than plain find_path/find_library, so it's tried
+# first; pkg-config + find_path/find_library (what the Debian/Homebrew
+# packages provide, no CMake config) is the fallback.
+find_package(rtlsdr CONFIG QUIET)
+
+if(TARGET rtlsdr::rtlsdr)
+    set(RTLSDR_TARGET rtlsdr::rtlsdr)
+    message(STATUS "librtlsdr found via CMake package config (rtlsdr::rtlsdr)")
+else()
+    find_package(PkgConfig QUIET)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(PC_RTLSDR QUIET librtlsdr)
+    endif()
+
+    find_path(RTLSDR_INCLUDE_DIR
+        NAMES rtl-sdr.h
+        HINTS ${PC_RTLSDR_INCLUDE_DIRS}
+    )
+    find_library(RTLSDR_LIBRARY
+        NAMES rtlsdr librtlsdr
+        HINTS ${PC_RTLSDR_LIBRARY_DIRS}
+    )
+
+    if(NOT RTLSDR_INCLUDE_DIR OR NOT RTLSDR_LIBRARY)
+        message(FATAL_ERROR "librtlsdr not found. Install librtlsdr-dev (Linux), 'brew install librtlsdr' (macOS), or the rtlsdr vcpkg port (Windows).")
+    endif()
+
+    message(STATUS "librtlsdr include: ${RTLSDR_INCLUDE_DIR}")
+    message(STATUS "librtlsdr library: ${RTLSDR_LIBRARY}")
 endif()
-
-find_path(RTLSDR_INCLUDE_DIR
-    NAMES rtl-sdr.h
-    HINTS ${PC_RTLSDR_INCLUDE_DIRS}
-)
-find_library(RTLSDR_LIBRARY
-    NAMES rtlsdr librtlsdr
-    HINTS ${PC_RTLSDR_LIBRARY_DIRS}
-)
-
-if(NOT RTLSDR_INCLUDE_DIR OR NOT RTLSDR_LIBRARY)
-    message(FATAL_ERROR "librtlsdr not found. Install librtlsdr-dev (Linux), 'brew install librtlsdr' (macOS), or the rtlsdr vcpkg port (Windows).")
-endif()
-
-message(STATUS "librtlsdr include: ${RTLSDR_INCLUDE_DIR}")
-message(STATUS "librtlsdr library: ${RTLSDR_LIBRARY}")
 
 set(APP_SOURCES
     src/main.cpp
@@ -94,16 +106,19 @@ set(APP_SOURCES
 
 add_executable(sdr-scanner ${APP_SOURCES})
 
-target_include_directories(sdr-scanner PRIVATE
-    src
-    ${RTLSDR_INCLUDE_DIR}
-)
+target_include_directories(sdr-scanner PRIVATE src)
 
 target_link_libraries(sdr-scanner PRIVATE
     Qt6::Widgets
     Qt6::Multimedia
-    ${RTLSDR_LIBRARY}
 )
+
+if(RTLSDR_TARGET)
+    target_link_libraries(sdr-scanner PRIVATE ${RTLSDR_TARGET})
+else()
+    target_include_directories(sdr-scanner PRIVATE ${RTLSDR_INCLUDE_DIR})
+    target_link_libraries(sdr-scanner PRIVATE ${RTLSDR_LIBRARY})
+endif()
 
 if(WIN32)
     target_compile_definitions(sdr-scanner PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
@@ -131,13 +146,17 @@ if(WIN32)
         install(CODE "execute_process(COMMAND \"${WINDEPLOYQT_EXECUTABLE}\" --release --no-translations \
                       \"\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/sdr-scanner.exe\")")
     endif()
-    # librtlsdr/libusb ship as separate DLLs alongside their import libs on
-    # Windows (e.g. via vcpkg); grab anything sitting next to the .lib we
-    # linked against so the installer doesn't need a separate manual step.
-    get_filename_component(RTLSDR_LIB_DIR "${RTLSDR_LIBRARY}" DIRECTORY)
-    file(GLOB RTLSDR_RUNTIME_DLLS "${RTLSDR_LIB_DIR}/../bin/*.dll")
-    if(RTLSDR_RUNTIME_DLLS)
-        install(FILES ${RTLSDR_RUNTIME_DLLS} DESTINATION ${CMAKE_INSTALL_BINDIR})
+    # librtlsdr/libusb ship as separate runtime DLLs on Windows (e.g. via
+    # vcpkg) rather than being statically linked in; grab every DLL out of
+    # vcpkg's own installed-triplet bin directory (VCPKG_INSTALLED_DIR/
+    # VCPKG_TARGET_TRIPLET are set by vcpkg's toolchain file) so the
+    # installer is self-contained regardless of which discovery path found
+    # librtlsdr above.
+    if(VCPKG_INSTALLED_DIR AND VCPKG_TARGET_TRIPLET)
+        file(GLOB VCPKG_RUNTIME_DLLS "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/bin/*.dll")
+        if(VCPKG_RUNTIME_DLLS)
+            install(FILES ${VCPKG_RUNTIME_DLLS} DESTINATION ${CMAKE_INSTALL_BINDIR})
+        endif()
     endif()
 endif()
 
