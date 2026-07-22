@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.19)
-project(SdrScanner VERSION 0.1.0 LANGUAGES CXX)
+project(SdrScanner VERSION 0.0.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -149,6 +149,15 @@ if(NOT DEFINED OS_TAG)
     set(OS_TAG "local")
 endif()
 
+# APP_VERSION overrides the package version independently of the
+# project()-declared version above (which is just the source-tree
+# fallback for local dev builds). The release workflow passes
+# -DAPP_VERSION=<tag, minus the leading v> so package filenames match the
+# git tag that triggered the build, e.g. v0.0.1 -> 0.0.1.
+if(NOT DEFINED APP_VERSION)
+    set(APP_VERSION "${PROJECT_VERSION}")
+endif()
+
 set(CPACK_PACKAGE_NAME "sdr-scanner")
 set(CPACK_PACKAGE_VENDOR "SDR-Scanner Project")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Analog-style scanner for RTL-SDR and compatible USB SDR dongles")
@@ -160,7 +169,7 @@ squelch with a one-shot Auto Tune calibration, an activity log, and a \
 mains-hum notch filter.")
 set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/JamesBurnettNET/SDR-Scanner")
 set(CPACK_PACKAGE_CONTACT "James Burnett")
-set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+set(CPACK_PACKAGE_VERSION "${APP_VERSION}")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE")
 set(CPACK_PACKAGE_EXECUTABLES "sdr-scanner" "SDR Scanner")
 
