@@ -181,13 +181,15 @@ jobs:
             echo "version=0.0.0-dev" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Configure
+        run: >
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DOS_TAG=win
+          -DAPP_VERSION=${{ steps.version.outputs.version }}
+          -DCMAKE_TOOLCHAIN_FILE=C:\vcpkg\scripts\buildsystems\vcpkg.cmake
+          -DVCPKG_TARGET_TRIPLET=x64-windows
+
       - name: Build
-        run: |
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DOS_TAG=win `
-            -DAPP_VERSION=${{ steps.version.outputs.version }} `
-            -DCMAKE_TOOLCHAIN_FILE=C:\vcpkg\scripts\buildsystems\vcpkg.cmake `
-            -DVCPKG_TARGET_TRIPLET=x64-windows
-          cmake --build build --config Release
+        run: cmake --build build --config Release
 
       - name: Run self-test
         shell: pwsh
