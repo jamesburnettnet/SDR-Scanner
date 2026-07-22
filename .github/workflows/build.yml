@@ -1,0 +1,196 @@
+name: Build and Package
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+jobs:
+  # Each Linux target builds inside a Docker container matching that exact
+  # OS/version, rather than relying on GitHub's native runner images --
+  # GitHub doesn't host Fedora runners at all, and pinning to a container
+  # image is the only reliable way to build against a specific distro's own
+  # Qt6 packages (which is what "Built on the version of Qt supported by
+  # each OS" means here: whatever qt6-base-dev resolves to on that distro,
+  # not a hand-picked version).
+  build-linux:
+    name: Build (${{ matrix.os_tag }})
+    runs-on: ubuntu-latest
+    container: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os_tag: deb13
+            image: debian:13
+            family: debian
+            generator: DEB
+            pkg_ext: deb
+          - os_tag: ub2604
+            image: ubuntu:26.04
+            family: debian
+            generator: DEB
+            pkg_ext: deb
+          - os_tag: fed44
+            image: fedora:44
+            family: fedora
+            generator: RPM
+            pkg_ext: rpm
+    steps:
+      - name: Install build dependencies (Debian/Ubuntu)
+        if: matrix.family == 'debian'
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential cmake git ca-certificates \
+            qt6-base-dev qt6-base-dev-tools qt6-multimedia-dev \
+            librtlsdr-dev libusb-1.0-0-dev \
+            dpkg-dev file
+
+      - name: Install build dependencies (Fedora)
+        if: matrix.family == 'fedora'
+        run: |
+          dnf install -y \
+            gcc-c++ cmake git \
+            qt6-qtbase-devel qt6-qtmultimedia-devel \
+            rtl-sdr-devel libusb1-devel \
+            rpm-build file
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure
+        run: >
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          -DOS_TAG=${{ matrix.os_tag }}
+          -DCPACK_GENERATOR=${{ matrix.generator }}
+
+      - name: Build
+        run: cmake --build build -j"$(nproc)"
+
+      - name: Package
+        working-directory: build
+        run: cpack
+
+      - name: Stage package for upload
+        run: |
+          mkdir -p dist
+          cp build/*.${{ matrix.pkg_ext }} dist/
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdr-scanner-${{ matrix.os_tag }}
+          path: dist/*
+          if-no-files-found: error
+
+  # Installs each just-built package into a *fresh* container of the same
+  # OS (not the one that built it) and confirms it installs cleanly with
+  # its declared dependencies alone, and that the installed binary runs.
+  test-install-linux:
+    name: Test install (${{ matrix.os_tag }})
+    needs: build-linux
+    runs-on: ubuntu-latest
+    container: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os_tag: deb13
+            image: debian:13
+            family: debian
+          - os_tag: ub2604
+            image: ubuntu:26.04
+            family: debian
+          - os_tag: fed44
+            image: fedora:44
+            family: fedora
+    steps:
+      - name: Download package artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: sdr-scanner-${{ matrix.os_tag }}
+          path: pkg
+
+      - name: Install package (Debian/Ubuntu)
+        if: matrix.family == 'debian'
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y ./pkg/*.deb
+
+      - name: Install package (Fedora)
+        if: matrix.family == 'fedora'
+        run: dnf install -y ./pkg/*.rpm
+
+      - name: Verify installed files
+        run: |
+          test -x /usr/bin/sdr-scanner
+          test -f /usr/share/applications/sdr-scanner.desktop
+          test -f /usr/share/icons/hicolor/scalable/apps/sdr-scanner.svg
+          echo "All expected files present."
+
+      - name: Smoke test (headless)
+        run: |
+          QT_QPA_PLATFORM=offscreen timeout 5 /usr/bin/sdr-scanner
+          code=$?
+          # 124 == killed by `timeout` after running successfully; 0 ==
+          # exited cleanly on its own. Anything else means it crashed or
+          # failed to start (e.g. a missing runtime dependency).
+          if [ "$code" -ne 124 ] && [ "$code" -ne 0 ]; then
+            echo "sdr-scanner exited with unexpected code $code"
+            exit 1
+          fi
+          echo "sdr-scanner ran successfully (exit code $code)."
+
+  # Windows build only -- no install-test job. Verifying a silent NSIS
+  # install end-to-end is meaningfully more involved than apt/dnf and
+  # untested here for lack of a Windows environment to validate it
+  # against; per instructions this is fine to skip.
+  build-windows:
+    name: Build (win)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.8.*"
+          modules: "qtmultimedia"
+          cache: true
+
+      - name: Install NSIS (for the CPack installer)
+        run: choco install nsis -y
+        shell: cmd
+
+      - name: Install librtlsdr via vcpkg
+        run: |
+          git clone https://github.com/microsoft/vcpkg.git C:\vcpkg
+          C:\vcpkg\bootstrap-vcpkg.bat
+          C:\vcpkg\vcpkg.exe install rtlsdr:x64-windows
+        shell: cmd
+
+      - name: Configure
+        run: >
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DOS_TAG=win
+          -DCMAKE_TOOLCHAIN_FILE=C:\vcpkg\scripts\buildsystems\vcpkg.cmake
+          -DVCPKG_TARGET_TRIPLET=x64-windows
+
+      - name: Build
+        run: cmake --build build --config Release -j 4
+
+      - name: Package
+        working-directory: build
+        run: cpack -C Release
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdr-scanner-win
+          path: build/*.exe
+          if-no-files-found: error

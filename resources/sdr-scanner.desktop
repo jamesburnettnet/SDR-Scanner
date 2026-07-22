@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=SDR Scanner
+Comment=Analog-style radio scanner for RTL-SDR and compatible USB SDR devices
+Exec=sdr-scanner
+Icon=sdr-scanner
+Terminal=false
+Categories=Utility;HamRadio;
+StartupWMClass=sdr-scanner

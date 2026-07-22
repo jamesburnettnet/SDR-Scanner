@@ -67,3 +67,24 @@ vcpkg_installed/
 # test output & cache
 Testing/
 .cache/
+
+# CPack packaging output
+_CPack_Packages/
+*.deb
+*.rpm
+*.msi
+CPackConfig.cmake
+CPackSourceConfig.cmake
+
+# IDE / editor
+.vscode/
+.idea/
+*.pro.user
+*.pro.user.*
+CMakeLists.txt.user
+CMakeUserPresets.json
+*~
+
+# OS cruft
+.DS_Store
+Thumbs.db
