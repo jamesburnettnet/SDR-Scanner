@@ -24,6 +24,30 @@ find_package(Qt6 REQUIRED COMPONENTS Widgets Multimedia)
 # (find_package(rtlsdr CONFIG REQUIRED), target rtlsdr::rtlsdr). So on
 # Windows specifically, that's what's used instead.
 if(WIN32)
+    # Diagnostics: find_package(rtlsdr CONFIG) has failed here before
+    # despite the vcpkg install step itself succeeding, for reasons not
+    # yet confirmed. Print what CMake actually sees before asking it to
+    # search, so a failure here is debuggable from the log instead of
+    # just "not found" again.
+    message(STATUS "CMAKE_TOOLCHAIN_FILE: ${CMAKE_TOOLCHAIN_FILE}")
+    message(STATUS "CMAKE_PREFIX_PATH: ${CMAKE_PREFIX_PATH}")
+    message(STATUS "VCPKG_INSTALLED_DIR: ${VCPKG_INSTALLED_DIR}")
+    message(STATUS "VCPKG_TARGET_TRIPLET: ${VCPKG_TARGET_TRIPLET}")
+    if(DEFINED VCPKG_INSTALLED_DIR AND DEFINED VCPKG_TARGET_TRIPLET)
+        set(_vcpkg_triplet_dir "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}")
+        message(STATUS "Expected vcpkg triplet dir: ${_vcpkg_triplet_dir}")
+        if(EXISTS "${_vcpkg_triplet_dir}")
+            file(GLOB _vcpkg_rtlsdr_share "${_vcpkg_triplet_dir}/share/rtlsdr*")
+            message(STATUS "share/rtlsdr* matches: ${_vcpkg_rtlsdr_share}")
+        else()
+            message(STATUS "Triplet dir does not exist on disk.")
+        endif()
+        # Belt-and-suspenders: the toolchain file should already add this
+        # to CMAKE_PREFIX_PATH automatically, but append it explicitly in
+        # case that automatic hookup isn't happening for some reason.
+        list(APPEND CMAKE_PREFIX_PATH "${_vcpkg_triplet_dir}")
+    endif()
+
     find_package(rtlsdr CONFIG REQUIRED)
     set(RTLSDR_TARGET rtlsdr::rtlsdr)
     message(STATUS "librtlsdr found via CMake package config (rtlsdr::rtlsdr)")
