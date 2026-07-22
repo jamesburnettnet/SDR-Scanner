@@ -1,6 +1,7 @@
 # SDR Scanner
 
 [![Build and Package](https://github.com/JamesBurnettNET/SDR-Scanner/actions/workflows/build.yml/badge.svg)](https://github.com/JamesBurnettNET/SDR-Scanner/actions/workflows/build.yml)
+[![Release](https://github.com/JamesBurnettNET/SDR-Scanner/actions/workflows/release.yml/badge.svg)](https://github.com/JamesBurnettNET/SDR-Scanner/actions/workflows/release.yml)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 
 A traditional analog-style radio scanner, built on an RTL-SDR (or compatible)
@@ -48,9 +49,9 @@ the same chipset and driver. Only one device is used at a time, by design.
 
 ## Installing
 
-Pre-built packages are published as artifacts on the
-[Build and Package workflow](https://github.com/JamesBurnettNET/SDR-Scanner/actions/workflows/build.yml)
-for every push to `main`:
+Pre-built packages are published on the
+[Releases page](https://github.com/JamesBurnettNET/SDR-Scanner/releases)
+for every tagged version (`v*.*.*`):
 
 | OS | Package |
 | --- | --- |
