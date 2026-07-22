@@ -146,72 +146,9 @@ jobs:
           path: build/*.rpm
           if-no-files-found: error
 
-  build-windows:
-    name: Build .exe (Windows / Qt6)
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Qt
-        uses: jurplel/install-qt-action@v3
-        with:
-          version: "6.8.*"
-          arch: "win64_msvc2022_64"
-          modules: "qtmultimedia"
-          cache: true
-
-      - name: Install NSIS
-        run: choco install nsis --no-progress -y
-        shell: cmd
-
-      - name: Install librtlsdr via vcpkg
-        run: |
-          git clone https://github.com/microsoft/vcpkg.git C:\vcpkg
-          C:\vcpkg\bootstrap-vcpkg.bat
-          C:\vcpkg\vcpkg.exe install rtlsdr:x64-windows
-        shell: cmd
-
-      - name: Determine version from tag
-        id: version
-        shell: bash
-        run: |
-          if [[ "${{ github.ref_type }}" == "tag" ]]; then
-            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-          else
-            echo "version=0.0.0-dev" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Configure
-        run: >
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DOS_TAG=win
-          -DAPP_VERSION=${{ steps.version.outputs.version }}
-          -DCMAKE_TOOLCHAIN_FILE=C:\vcpkg\scripts\buildsystems\vcpkg.cmake
-          -DVCPKG_TARGET_TRIPLET=x64-windows
-
-      - name: Build
-        run: cmake --build build --config Release
-
-      - name: Run self-test
-        shell: pwsh
-        run: |
-          $qtBin = (Get-Command qmake.exe).Source | Split-Path
-          $env:QT_PLUGIN_PATH = Join-Path (Split-Path $qtBin) "plugins"
-          .\build\Release\sdr-scanner.exe --test
-
-      - name: Package
-        working-directory: build
-        run: cpack -C Release
-
-      - name: Upload
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-installer
-          path: build/*.exe
-          if-no-files-found: error
-
   release:
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [build-deb-debian13, build-deb-ubuntu26, build-rpm, build-windows]
+    needs: [build-deb-debian13, build-deb-ubuntu26, build-rpm]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -226,5 +163,4 @@ jobs:
             deb-debian13/*.deb
             deb-ubuntu26/*.deb
             rpm-package/*.rpm
-            windows-installer/*.exe
           generate_release_notes: true

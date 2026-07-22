@@ -14,65 +14,31 @@ endif()
 find_package(Qt6 REQUIRED COMPONENTS Widgets Multimedia)
 
 # --- librtlsdr discovery -----------------------------------------------
-# Debian/Ubuntu (librtlsdr-dev) and Homebrew (macOS) provide plain
-# pkg-config + headers/lib with no CMake package config, so that's the
-# only discovery path tried on those platforms -- this is what was already
-# proven working there; no reason to risk it by adding another path.
-#
-# vcpkg's "rtlsdr" port is different: per its own usage docs it does NOT
-# support plain find_path/find_library at all, only a CMake package config
-# (find_package(rtlsdr CONFIG REQUIRED), target rtlsdr::rtlsdr). So on
-# Windows specifically, that's what's used instead.
-if(WIN32)
-    # Diagnostics: find_package(rtlsdr CONFIG) has failed here before
-    # despite the vcpkg install step itself succeeding, for reasons not
-    # yet confirmed. Print what CMake actually sees before asking it to
-    # search, so a failure here is debuggable from the log instead of
-    # just "not found" again.
-    message(STATUS "CMAKE_TOOLCHAIN_FILE: ${CMAKE_TOOLCHAIN_FILE}")
-    message(STATUS "CMAKE_PREFIX_PATH: ${CMAKE_PREFIX_PATH}")
-    message(STATUS "VCPKG_INSTALLED_DIR: ${VCPKG_INSTALLED_DIR}")
-    message(STATUS "VCPKG_TARGET_TRIPLET: ${VCPKG_TARGET_TRIPLET}")
-    if(DEFINED VCPKG_INSTALLED_DIR AND DEFINED VCPKG_TARGET_TRIPLET)
-        set(_vcpkg_triplet_dir "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}")
-        message(STATUS "Expected vcpkg triplet dir: ${_vcpkg_triplet_dir}")
-        if(EXISTS "${_vcpkg_triplet_dir}")
-            file(GLOB _vcpkg_rtlsdr_share "${_vcpkg_triplet_dir}/share/rtlsdr*")
-            message(STATUS "share/rtlsdr* matches: ${_vcpkg_rtlsdr_share}")
-        else()
-            message(STATUS "Triplet dir does not exist on disk.")
-        endif()
-        # Belt-and-suspenders: the toolchain file should already add this
-        # to CMAKE_PREFIX_PATH automatically, but append it explicitly in
-        # case that automatic hookup isn't happening for some reason.
-        list(APPEND CMAKE_PREFIX_PATH "${_vcpkg_triplet_dir}")
-    endif()
-
-    find_package(rtlsdr CONFIG REQUIRED)
-    set(RTLSDR_TARGET rtlsdr::rtlsdr)
-    message(STATUS "librtlsdr found via CMake package config (rtlsdr::rtlsdr)")
-else()
-    find_package(PkgConfig QUIET)
-    if(PkgConfig_FOUND)
-        pkg_check_modules(PC_RTLSDR QUIET librtlsdr)
-    endif()
-
-    find_path(RTLSDR_INCLUDE_DIR
-        NAMES rtl-sdr.h
-        HINTS ${PC_RTLSDR_INCLUDE_DIRS}
-    )
-    find_library(RTLSDR_LIBRARY
-        NAMES rtlsdr librtlsdr
-        HINTS ${PC_RTLSDR_LIBRARY_DIRS}
-    )
-
-    if(NOT RTLSDR_INCLUDE_DIR OR NOT RTLSDR_LIBRARY)
-        message(FATAL_ERROR "librtlsdr not found. Install librtlsdr-dev (Linux) or 'brew install librtlsdr' (macOS).")
-    endif()
-
-    message(STATUS "librtlsdr include: ${RTLSDR_INCLUDE_DIR}")
-    message(STATUS "librtlsdr library: ${RTLSDR_LIBRARY}")
+# Works with the Debian/Ubuntu package (librtlsdr-dev) and Homebrew on
+# macOS, both plain pkg-config + headers/lib with no CMake package config.
+# (Windows/vcpkg support was removed -- vcpkg's rtlsdr port needs a
+# different discovery mechanism entirely (a CMake package config, not
+# find_path/find_library) and was never gotten working reliably in CI.)
+find_package(PkgConfig QUIET)
+if(PkgConfig_FOUND)
+    pkg_check_modules(PC_RTLSDR QUIET librtlsdr)
 endif()
+
+find_path(RTLSDR_INCLUDE_DIR
+    NAMES rtl-sdr.h
+    HINTS ${PC_RTLSDR_INCLUDE_DIRS}
+)
+find_library(RTLSDR_LIBRARY
+    NAMES rtlsdr librtlsdr
+    HINTS ${PC_RTLSDR_LIBRARY_DIRS}
+)
+
+if(NOT RTLSDR_INCLUDE_DIR OR NOT RTLSDR_LIBRARY)
+    message(FATAL_ERROR "librtlsdr not found. Install librtlsdr-dev (Linux) or 'brew install librtlsdr' (macOS).")
+endif()
+
+message(STATUS "librtlsdr include: ${RTLSDR_INCLUDE_DIR}")
+message(STATUS "librtlsdr library: ${RTLSDR_LIBRARY}")
 
 set(APP_SOURCES
     src/main.cpp
@@ -131,23 +97,13 @@ set(APP_SOURCES
 
 add_executable(sdr-scanner ${APP_SOURCES})
 
-target_include_directories(sdr-scanner PRIVATE src)
+target_include_directories(sdr-scanner PRIVATE src ${RTLSDR_INCLUDE_DIR})
 
 target_link_libraries(sdr-scanner PRIVATE
     Qt6::Widgets
     Qt6::Multimedia
+    ${RTLSDR_LIBRARY}
 )
-
-if(RTLSDR_TARGET)
-    target_link_libraries(sdr-scanner PRIVATE ${RTLSDR_TARGET})
-else()
-    target_include_directories(sdr-scanner PRIVATE ${RTLSDR_INCLUDE_DIR})
-    target_link_libraries(sdr-scanner PRIVATE ${RTLSDR_LIBRARY})
-endif()
-
-if(WIN32)
-    target_compile_definitions(sdr-scanner PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
-endif()
 
 # --- Install ---------------------------------------------------------------
 include(GNUInstallDirs)
@@ -161,33 +117,9 @@ if(UNIX AND NOT APPLE)
             RENAME sdr-scanner.svg)
 endif()
 
-if(WIN32)
-    # windeployqt bundles the Qt DLLs (and librtlsdr.dll/libusb, since
-    # they're picked up as PE dependencies too) next to the executable so
-    # the NSIS installer is self-contained -- run at install time so it
-    # sees the final staged binary.
-    find_program(WINDEPLOYQT_EXECUTABLE windeployqt HINTS "${Qt6_DIR}/../../../bin")
-    if(WINDEPLOYQT_EXECUTABLE)
-        install(CODE "execute_process(COMMAND \"${WINDEPLOYQT_EXECUTABLE}\" --release --no-translations \
-                      \"\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/sdr-scanner.exe\")")
-    endif()
-    # librtlsdr/libusb ship as separate runtime DLLs on Windows (e.g. via
-    # vcpkg) rather than being statically linked in; grab every DLL out of
-    # vcpkg's own installed-triplet bin directory (VCPKG_INSTALLED_DIR/
-    # VCPKG_TARGET_TRIPLET are set by vcpkg's toolchain file) so the
-    # installer is self-contained regardless of which discovery path found
-    # librtlsdr above.
-    if(VCPKG_INSTALLED_DIR AND VCPKG_TARGET_TRIPLET)
-        file(GLOB VCPKG_RUNTIME_DLLS "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/bin/*.dll")
-        if(VCPKG_RUNTIME_DLLS)
-            install(FILES ${VCPKG_RUNTIME_DLLS} DESTINATION ${CMAKE_INSTALL_BINDIR})
-        endif()
-    endif()
-endif()
-
 # --- Packaging (CPack) ------------------------------------------------------
 # OS_TAG identifies the target OS in package filenames (deb13, ub2604,
-# fed44, win) -- CI passes it via -DOS_TAG=..., defaults to "local" for
+# fed44) -- CI passes it via -DOS_TAG=..., defaults to "local" for
 # plain developer `cpack` runs.
 if(NOT DEFINED OS_TAG)
     set(OS_TAG "local")
@@ -252,16 +184,6 @@ if(UNIX AND NOT APPLE)
         set(CPACK_RPM_FILE_NAME
             "${CPACK_PACKAGE_NAME}-${CPACK_PACKAGE_VERSION}-1.${OS_TAG}.${CMAKE_SYSTEM_PROCESSOR}.rpm")
     endif()
-endif()
-
-if(WIN32)
-    set(CPACK_GENERATOR "NSIS")
-    set(CPACK_NSIS_PACKAGE_NAME "SDR Scanner")
-    set(CPACK_NSIS_DISPLAY_NAME "SDR Scanner")
-    set(CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL ON)
-    set(CPACK_NSIS_MODIFY_PATH OFF)
-    set(CPACK_NSIS_URL_INFO_ABOUT "${CPACK_PACKAGE_HOMEPAGE_URL}")
-    set(CPACK_PACKAGE_FILE_NAME "${CPACK_PACKAGE_NAME}-${CPACK_PACKAGE_VERSION}-${OS_TAG}")
 endif()
 
 include(CPack)

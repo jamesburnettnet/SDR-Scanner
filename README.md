@@ -58,14 +58,16 @@ for every tagged version (`v*.*.*`):
 | Debian 13 (trixie) | `sdr-scanner_<version>-1deb13_amd64.deb` |
 | Ubuntu 26.04 | `sdr-scanner_<version>-1ub2604_amd64.deb` |
 | Fedora 44 | `sdr-scanner-<version>-1.fed44.x86_64.rpm` |
-| Windows | `sdr-scanner-<version>-win.exe` (NSIS installer) |
 
-Each Linux package declares its own runtime dependencies (Qt6, librtlsdr,
-etc.) automatically via `dpkg-shlibdeps`/RPM's auto-requires, so a normal
+Each package declares its own runtime dependencies (Qt6, librtlsdr, etc.)
+automatically via `dpkg-shlibdeps`/RPM's auto-requires, so a normal
 `apt install ./sdr-scanner_*.deb` or `dnf install ./sdr-scanner-*.rpm`
 resolves everything from the distro's own repos — nothing to hand-install
-first. The Windows installer bundles the Qt/librtlsdr DLLs it needs, so
-it's self-contained.
+first.
+
+Windows and macOS aren't packaged/built by CI right now; the source itself
+avoids Linux-specific APIs, so building from source may still work there,
+just untested.
 
 ```bash
 # Debian 13 / Ubuntu 26.04
@@ -100,19 +102,14 @@ sudo dnf install gcc-c++ cmake qt6-qtbase-devel qt6-qtmultimedia-devel \
                   rtl-sdr-devel libusb1-devel
 ```
 
-**Windows:** Qt6 (with Multimedia) via the
-[online installer](https://www.qt.io/download-qt-installer) or
-[aqtinstall](https://github.com/miurahr/aqtinstall), and `librtlsdr` via
-[vcpkg](https://github.com/microsoft/vcpkg) (`vcpkg install rtlsdr`).
-
-Then, on any platform:
+Then:
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ```
 
-Run: `./build/sdr-scanner` (`build\sdr-scanner.exe` on Windows).
+Run: `./build/sdr-scanner`.
 
 ### Building a package locally
 
