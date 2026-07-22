@@ -58,7 +58,7 @@ jobs:
             rpm-build file
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Configure
         run: >
@@ -82,7 +82,7 @@ jobs:
           cp build/*.${{ matrix.pkg_ext }} dist/
 
       - name: Upload package artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: sdr-scanner-${{ matrix.os_tag }}
           path: dist/*
@@ -111,7 +111,7 @@ jobs:
             family: fedora
     steps:
       - name: Download package artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: sdr-scanner-${{ matrix.os_tag }}
           path: pkg
