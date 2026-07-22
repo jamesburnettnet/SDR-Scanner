@@ -7,8 +7,36 @@ on:
   workflow_dispatch: {}
 
 jobs:
+  # Computed exactly once and passed to every build job as a job output,
+  # rather than each job independently re-deriving it from
+  # github.ref_type/GITHUB_REF_NAME -- three separate copies of that logic
+  # previously produced different answers within the same run (two jobs
+  # got the tag version, one fell back to "0.0.0-dev"), which shouldn't be
+  # possible if those context values are consistent across jobs in a run,
+  # but evidently wasn't reliable in practice. Reading the version back
+  # from the actual checked-out git state (git describe) sidesteps
+  # whatever that inconsistency was instead of trying to explain it.
+  determine-version:
+    name: Determine version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Determine version from tag
+        id: version
+        run: |
+          VERSION=$(git describe --tags --exact-match --match 'v*' 2>/dev/null | sed 's/^v//' || true)
+          if [ -z "$VERSION" ]; then
+            VERSION="0.0.0-dev"
+          fi
+          echo "Resolved version: $VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
   build-deb-debian13:
     name: Build .deb (Debian 13 / Qt6)
+    needs: determine-version
     runs-on: ubuntu-latest
     container:
       image: debian:13
@@ -25,19 +53,10 @@ jobs:
             librtlsdr-dev libusb-1.0-0-dev \
             dpkg-dev file
 
-      - name: Determine version from tag
-        id: version
-        run: |
-          if [[ "${{ github.ref_type }}" == "tag" ]]; then
-            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-          else
-            echo "version=0.0.0-dev" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Build
         run: |
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DOS_TAG=deb13 -DCPACK_GENERATOR=DEB \
-            -DAPP_VERSION=${{ steps.version.outputs.version }}
+            -DAPP_VERSION=${{ needs.determine-version.outputs.version }}
           cmake --build build --parallel "$(nproc)"
 
       - name: Run self-test
@@ -56,6 +75,7 @@ jobs:
 
   build-deb-ubuntu26:
     name: Build .deb (Ubuntu 26.04 / Qt6)
+    needs: determine-version
     runs-on: ubuntu-latest
     container:
       image: ubuntu:26.04
@@ -72,19 +92,10 @@ jobs:
             librtlsdr-dev libusb-1.0-0-dev \
             dpkg-dev file
 
-      - name: Determine version from tag
-        id: version
-        run: |
-          if [[ "${{ github.ref_type }}" == "tag" ]]; then
-            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-          else
-            echo "version=0.0.0-dev" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Build
         run: |
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DOS_TAG=ub2604 -DCPACK_GENERATOR=DEB \
-            -DAPP_VERSION=${{ steps.version.outputs.version }}
+            -DAPP_VERSION=${{ needs.determine-version.outputs.version }}
           cmake --build build --parallel "$(nproc)"
 
       - name: Run self-test
@@ -103,6 +114,7 @@ jobs:
 
   build-rpm:
     name: Build .rpm (Fedora 44 / Qt6)
+    needs: determine-version
     runs-on: ubuntu-latest
     container:
       image: fedora:44
@@ -117,19 +129,10 @@ jobs:
             rtl-sdr-devel libusb1-devel \
             rpm-build file
 
-      - name: Determine version from tag
-        id: version
-        run: |
-          if [[ "${{ github.ref_type }}" == "tag" ]]; then
-            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-          else
-            echo "version=0.0.0-dev" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Build
         run: |
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DOS_TAG=fed44 -DCPACK_GENERATOR=RPM \
-            -DAPP_VERSION=${{ steps.version.outputs.version }}
+            -DAPP_VERSION=${{ needs.determine-version.outputs.version }}
           cmake --build build --parallel "$(nproc)"
 
       - name: Run self-test
