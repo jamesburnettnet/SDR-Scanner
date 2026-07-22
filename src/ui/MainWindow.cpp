@@ -29,10 +29,14 @@
 #include <QCloseEvent>
 #include <QWidget>
 
+#ifndef APP_VERSION_STRING
+#define APP_VERSION_STRING "dev"
+#endif
+
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
 {
-    setWindowTitle(QStringLiteral("SDR Scanner"));
+    setWindowTitle(QStringLiteral("SDR Scanner v%1").arg(QStringLiteral(APP_VERSION_STRING)));
 
     m_deviceManager = new SdrDeviceManager(this);
     m_audioOutput = new AudioOutput(this);

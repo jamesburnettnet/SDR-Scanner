@@ -1,5 +1,15 @@
 cmake_minimum_required(VERSION 3.19)
-project(SdrScanner VERSION 0.0.1 LANGUAGES CXX)
+project(SdrScanner VERSION 0.0.2 LANGUAGES CXX)
+
+# APP_VERSION overrides the package/display version independently of the
+# project()-declared version above (which is just the source-tree fallback
+# for local dev builds). The release workflow passes
+# -DAPP_VERSION=<tag, minus the leading v> so packages and the app's own
+# window title match the git tag that triggered the build, e.g.
+# v0.0.2 -> 0.0.2.
+if(NOT DEFINED APP_VERSION)
+    set(APP_VERSION "${PROJECT_VERSION}")
+endif()
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -105,6 +115,11 @@ target_link_libraries(sdr-scanner PRIVATE
     ${RTLSDR_LIBRARY}
 )
 
+# Compiled into the binary so the window title can show it (see
+# MainWindow.cpp); same APP_VERSION used for package filenames above, so
+# a release build's title matches the tag it was built from.
+target_compile_definitions(sdr-scanner PRIVATE APP_VERSION_STRING="${APP_VERSION}")
+
 # --- Install ---------------------------------------------------------------
 include(GNUInstallDirs)
 
@@ -123,15 +138,6 @@ endif()
 # plain developer `cpack` runs.
 if(NOT DEFINED OS_TAG)
     set(OS_TAG "local")
-endif()
-
-# APP_VERSION overrides the package version independently of the
-# project()-declared version above (which is just the source-tree
-# fallback for local dev builds). The release workflow passes
-# -DAPP_VERSION=<tag, minus the leading v> so package filenames match the
-# git tag that triggered the build, e.g. v0.0.1 -> 0.0.1.
-if(NOT DEFINED APP_VERSION)
-    set(APP_VERSION "${PROJECT_VERSION}")
 endif()
 
 set(CPACK_PACKAGE_NAME "sdr-scanner")
