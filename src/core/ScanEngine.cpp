@@ -50,8 +50,22 @@ void ScanEngine::requestStop()
 {
     QMutexLocker lock(&m_streamMutex);
     m_stopRequested = true;
-    if (m_streamActive && m_device)
-        m_device->stopStreaming();
+    // Deliberately NOT calling m_device->stopStreaming() here. librtlsdr's
+    // rtlsdr_cancel_async() is documented (rtl-sdr.h) as safe to call only
+    // from within the streaming callback itself -- "due to incomplete
+    // concurrency implementation, this should only be called from within
+    // the callback function, so it is in the correct thread." This method
+    // runs on the GUI thread while rtlsdr_read_async() is blocked on the
+    // scan thread, so calling cancel from here is exactly the cross-thread
+    // call the library warns against (and a likely cause of the flaky
+    // Windows-only crashes seen around start/stop/reconnect -- the
+    // Windows build's vendored librtlsdr has a materially different
+    // internal implementation than whatever Linux distros package).
+    //
+    // Instead, onSamples() checks m_stopRequested on the next incoming
+    // sample block (at most one ~6.83ms block away, since streaming is
+    // active) and calls stopStreaming() from there, on the correct thread.
+    //
     // If nothing is streaming right now (we're between groups, e.g. mid
     // retune), there's nothing to cancel -- but m_stopRequested is now set
     // under the same lock that run()'s loop takes before starting the next
@@ -195,8 +209,17 @@ void ScanEngine::requestGroupSwitch()
 
 void ScanEngine::onSamples(const std::complex<float> *samples, size_t count)
 {
-    if (m_stopRequested)
+    if (m_stopRequested) {
+        // Cancel here, not from requestStop() on the GUI thread -- see the
+        // comment there. This is the streaming callback, i.e. the only
+        // thread librtlsdr documents rtlsdr_cancel_async() as safe to call
+        // from. May end up calling stopStreaming() again for a block or
+        // two more that were already in flight before the cancel takes
+        // effect; repeated calls are harmless since they just re-request
+        // cancellation on a device that's already stopping.
+        m_device->stopStreaming();
         return;
+    }
 
     const ScanGroup &group = m_groups[m_groupIndex];
     auto &processors = m_allProcessors[m_groupIndex];
