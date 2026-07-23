@@ -30,6 +30,13 @@ constexpr qint64 kMinLoggedDurationMs = 150;
 ScanEngine::ScanEngine(QObject *parent)
     : QThread(parent)
 {
+    // Auto-resolves to a queued connection: retuneRequested() is emitted
+    // from onSamples() on the scan thread, but this object's own thread
+    // affinity is whatever thread constructed it (the GUI thread) --
+    // subclassing QThread doesn't move the QObject itself, only run()
+    // actually executes on the new thread. See the class comment for why
+    // the retune needs to happen there instead of inline in onSamples().
+    connect(this, &ScanEngine::retuneRequested, this, &ScanEngine::performRetune);
 }
 
 ScanEngine::~ScanEngine()
@@ -69,11 +76,11 @@ void ScanEngine::requestStop()
     // sample block (at most one ~6.83ms block away, since streaming is
     // active) and calls stopStreaming() from there, on the correct thread.
     //
-    // If nothing is streaming right now (we're between groups, e.g. mid
-    // retune), there's nothing to cancel -- but m_stopRequested is now set
-    // under the same lock that run()'s loop takes before starting the next
-    // streaming session, so it's guaranteed to notice and stop instead of
-    // starting another blocking read that would never get cancelled.
+    // If nothing is streaming yet (a stop landing right as run() is still
+    // setting up), there's nothing to cancel -- but m_stopRequested is now
+    // set under the same lock run() takes before starting the stream, so
+    // it's guaranteed to notice and skip straight to cleanup instead of
+    // starting a blocking read that would never get cancelled.
 }
 
 void ScanEngine::run()
@@ -111,46 +118,42 @@ void ScanEngine::run()
     m_displayCursor = 0;
     m_blocksSinceDisplayStep = 0;
 
-    // Retuning always happens here, between streaming sessions, never from
-    // inside the async read callback -- see the class comment in the
-    // header for why that matters for tuner reliability.
-    while (true) {
-        {
-            QMutexLocker lock(&m_streamMutex);
-            if (m_stopRequested)
-                break;
-            m_device->setCenterFrequency(static_cast<uint64_t>(m_groups[m_groupIndex].centerHz));
-            m_switchGroupRequested = false;
-            m_streamActive = true;
-        }
-
-        publishSnapshot();
-        m_device->startStreaming([this](const std::complex<float> *s, size_t n) { onSamples(s, n); });
-
-        {
-            QMutexLocker lock(&m_streamMutex);
-            m_streamActive = false;
-        }
-
+    // The initial tune happens here, before streaming starts, on this same
+    // thread -- fine, since rtlsdr_read_async() hasn't started blocking
+    // yet. Every subsequent retune (on a group switch) happens live, via
+    // retuneRequested()/performRetune() on the GUI thread instead -- see
+    // the class comment for why the stream itself is only ever started
+    // once, for the whole session.
+    {
+        QMutexLocker lock(&m_streamMutex);
         if (m_stopRequested) {
-            SDR_LOG("engine") << "run(): stop requested, exiting loop";
-            break;
+            SDR_LOG("engine") << "run(): stop requested before streaming started";
+            ScannerSnapshot finalSnap;
+            finalSnap.mode = EngineMode::Idle;
+            finalSnap.deviceConnected = m_device->isOpen();
+            if (m_stateHolder)
+                m_stateHolder->publish(finalSnap);
+            return;
         }
+        m_device->setCenterFrequency(static_cast<uint64_t>(m_groups[m_groupIndex].centerHz));
+        m_streamActive = true;
+    }
 
-        if (!m_switchGroupRequested) {
-            // Streaming ended without us asking for a stop or a group
-            // switch -- most likely the device errored out or was
-            // unplugged. Report it and stop instead of spinning in a
-            // tight retune/restream retry loop against a dead handle.
-            SDR_LOG("engine") << "run(): streaming ended unexpectedly, lastError=" << m_device->lastError();
-            emit errorOccurred(QStringLiteral("SDR streaming stopped unexpectedly: %1").arg(m_device->lastError()));
-            break;
-        }
+    publishSnapshot();
+    m_device->startStreaming([this](const std::complex<float> *s, size_t n) { onSamples(s, n); });
 
-        SDR_LOG("engine") << "run(): switching group" << m_groupIndex << "->"
-                           << ((m_groupIndex + 1) % m_groups.size());
-        if (m_groups.size() > 1)
-            m_groupIndex = (m_groupIndex + 1) % m_groups.size();
+    {
+        QMutexLocker lock(&m_streamMutex);
+        m_streamActive = false;
+    }
+
+    if (m_stopRequested) {
+        SDR_LOG("engine") << "run(): stop requested, exiting";
+    } else {
+        // Streaming ended without us asking for a stop -- most likely the
+        // device errored out or was unplugged.
+        SDR_LOG("engine") << "run(): streaming ended unexpectedly, lastError=" << m_device->lastError();
+        emit errorOccurred(QStringLiteral("SDR streaming stopped unexpectedly: %1").arg(m_device->lastError()));
     }
 
     SDR_LOG("engine") << "run() exiting [thread" << QThread::currentThreadId() << "]";
@@ -190,10 +193,8 @@ void ScanEngine::buildAllProcessors()
 
 void ScanEngine::requestGroupSwitch()
 {
-    SDR_LOG("engine") << "requestGroupSwitch() [thread" << QThread::currentThreadId() << "]";
     if (m_groups.size() <= 1) {
-        // Nothing to switch to -- avoid pointlessly stopping/restarting
-        // the stream every dwell period for a single-group scan.
+        // Nothing to switch to.
         m_blocksInGroup = 0;
         return;
     }
@@ -203,21 +204,33 @@ void ScanEngine::requestGroupSwitch()
     m_blocksInGroup = 0;
     m_displayCursor = 0;
     m_blocksSinceDisplayStep = 0;
-    m_switchGroupRequested = true;
+    m_groupIndex = (m_groupIndex + 1) % m_groups.size();
 
-    // Called from onSamples(), i.e. from within the async read callback,
-    // on the same thread that's blocked inside startStreaming() below in
-    // run(). Cancelling from within the callback is the standard, safe
-    // way to unblock that call; the actual retune happens afterwards, back
-    // in run()'s loop, once streaming has fully stopped.
-    m_device->stopStreaming();
+    SDR_LOG("engine") << "requestGroupSwitch() [thread" << QThread::currentThreadId() << "] ->"
+                       << m_groupIndex;
+
+    // The stream itself keeps running -- only the center frequency needs
+    // to change, and that happens on the GUI thread via performRetune()
+    // (see the class comment for why: this method runs on the scan
+    // thread, from inside the streaming callback, where issuing another
+    // blocking libusb call would be a reentrancy hazard).
+    emit retuneRequested(static_cast<quint64>(m_groups[m_groupIndex].centerHz));
 
     // Note: channel processors for the next group are *not* recreated --
     // they were all built once up front in buildAllProcessors() and keep
     // accumulating their auto-squelch noise-floor estimate across the
     // whole scan session, including every time the loop comes back around
     // to a given group. Any stale FIR filter history from being untuned
-    // for a while flushes out within one block, so this is harmless.
+    // for a while flushes out within one block, so this is harmless -- as
+    // is the handful of blocks right after a retune that still reflect the
+    // previous group's RF (normal tuner settling transient, same as
+    // before).
+}
+
+void ScanEngine::performRetune(quint64 centerHz)
+{
+    if (m_device)
+        m_device->setCenterFrequency(centerHz);
 }
 
 void ScanEngine::onSamples(const std::complex<float> *samples, size_t count)
