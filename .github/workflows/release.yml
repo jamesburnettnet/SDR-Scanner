@@ -201,25 +201,36 @@ jobs:
         run: |
           $env:PATH = "C:\Qt\Tools\${{ env.MINGW_DIR }}\bin;$env:PATH"
           cmake --install build --prefix dist\sdr-scanner
-          Compress-Archive -Path dist\sdr-scanner\bin\* `
-            -DestinationPath dist\sdr-scanner-${{ needs.determine-version.outputs.version }}-win64.zip
 
+      # Upload the raw install output, not a pre-made .zip: actions/upload-artifact
+      # always wraps whatever it's given in its own zip for download, so
+      # pre-zipping here produced a zip-of-a-zip when downloaded from the
+      # Actions tab. The release job below zips this into the actual
+      # single-file win64.zip that gets attached to the GitHub Release.
       - name: Upload
         uses: actions/upload-artifact@v7
         with:
-          name: windows-zip
-          path: dist\*.zip
+          name: windows-build
+          path: dist\sdr-scanner\bin\*
           if-no-files-found: error
 
   release:
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [build-deb-debian13, build-deb-ubuntu26, build-rpm, build-windows-zip]
+    needs: [determine-version, build-deb-debian13, build-deb-ubuntu26, build-rpm, build-windows-zip]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - name: Download artifacts
         uses: actions/download-artifact@v8
+
+      # windows-build is the raw MinGW install output (see the comment on
+      # that job's Upload step); zip it here into the single-file archive
+      # that actually gets attached to the release.
+      - name: Zip Windows build
+        run: |
+          cd windows-build
+          zip -r "../sdr-scanner-${{ needs.determine-version.outputs.version }}-win64.zip" .
 
       # GitHub's "immutable releases" only allow asset uploads before a
       # release is published -- create it as a draft first (so each of the
@@ -233,7 +244,7 @@ jobs:
             deb-debian13/*.deb
             deb-ubuntu26/*.deb
             rpm-package/*.rpm
-            windows-zip/*.zip
+            sdr-scanner-${{ needs.determine-version.outputs.version }}-win64.zip
           generate_release_notes: true
 
       - name: Publish release

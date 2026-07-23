@@ -193,16 +193,20 @@ jobs:
         run: |
           $env:PATH = "C:\Qt\Tools\${{ env.MINGW_DIR }}\bin;$env:PATH"
           cmake --install build --prefix dist\sdr-scanner
-          Compress-Archive -Path dist\sdr-scanner\bin\* -DestinationPath dist\sdr-scanner-windows-x64.zip
 
+      # Upload the raw install output, not a pre-made .zip: actions/upload-artifact
+      # always wraps whatever it's given in its own zip for download, so
+      # pre-zipping here produced a zip-of-a-zip when downloaded from the
+      # Actions tab (the actual release .zip is assembled separately in
+      # release.yml, from this same raw output).
       - name: Upload package artifact
         uses: actions/upload-artifact@v7
         with:
           name: sdr-scanner-windows
-          path: dist\sdr-scanner-windows-x64.zip
+          path: dist\sdr-scanner\bin\*
           if-no-files-found: error
 
-  # Same idea as test-install-linux: unpack the just-built zip on a fresh
+  # Same idea as test-install-linux: run the just-built output on a fresh
   # runner (no leftover Qt/MinGW/PATH from the build job) and confirm the
   # binary runs standalone with nothing else installed.
   test-install-windows:
@@ -216,8 +220,5 @@ jobs:
           name: sdr-scanner-windows
           path: pkg
 
-      - name: Extract
-        run: Expand-Archive -Path pkg\sdr-scanner-windows-x64.zip -DestinationPath extracted
-
-      - name: Run self-test on the extracted binary
-        run: .\extracted\sdr-scanner.exe --test
+      - name: Run self-test on the downloaded binary
+        run: .\pkg\sdr-scanner.exe --test
