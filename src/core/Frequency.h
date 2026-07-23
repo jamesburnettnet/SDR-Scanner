@@ -32,8 +32,6 @@ struct Frequency {
     bool autoSquelch = true;
     double squelchDb = -50.0;
 
-    QString group;          // user-defined group / tag, e.g. "Police", "Aviation"
-
     QJsonObject toJson() const;
     static Frequency fromJson(const QJsonObject &obj);
 

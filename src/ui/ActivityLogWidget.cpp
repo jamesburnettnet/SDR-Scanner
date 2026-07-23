@@ -32,14 +32,13 @@ ActivityLogWidget::ActivityLogWidget(QWidget *parent)
 }
 
 void ActivityLogWidget::addEntry(const QDateTime &startTime, qint64 freqHz, const QString &label,
-                                  Modulation modulation, const QString &group, qint64 durationMs)
+                                  Modulation modulation, qint64 durationMs)
 {
     ActivityLogEntry e;
     e.startTime = startTime;
     e.freqHz = freqHz;
     e.label = label;
     e.modulation = modulation;
-    e.group = group;
     e.durationMs = durationMs;
     m_model.addEntry(e);
 }

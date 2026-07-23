@@ -89,7 +89,6 @@ QVector<Frequency> ExploreDialog::buildSweep() const
         f.modulation = mod;
         f.autoSquelch = autoSq;
         f.squelchDb = squelchDb;
-        f.group = QStringLiteral("__explore__");
         f.enabled = true;
         out.append(f);
     }

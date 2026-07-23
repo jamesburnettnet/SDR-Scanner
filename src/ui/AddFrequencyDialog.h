@@ -12,7 +12,7 @@ class QLabel;
 class QDialogButtonBox;
 
 // Add/edit form for a single scanned frequency: MHz, label, modulation
-// (FM/NFM/AM), squelch (auto or manual dB), and a free-form group tag.
+// (FM/NFM/AM), and squelch (auto or manual dB).
 //
 // Also hosts the "Auto Tune" button: a one-shot noise-floor measurement
 // (performed elsewhere, via the calibration handler wired up by whoever
@@ -23,7 +23,6 @@ class AddFrequencyDialog : public QDialog {
 public:
     explicit AddFrequencyDialog(QWidget *parent = nullptr);
 
-    void setExistingGroups(const QStringList &groups);
     void setFrequency(const Frequency &f);
     Frequency frequency() const;
 
@@ -50,7 +49,6 @@ private:
     QComboBox *m_modulationCombo;
     QCheckBox *m_autoSquelchCheck;
     QDoubleSpinBox *m_squelchSpin;
-    QComboBox *m_groupCombo;
     QPushButton *m_autoTuneButton;
     QLabel *m_calibrationLabel;
     QDialogButtonBox *m_buttons;

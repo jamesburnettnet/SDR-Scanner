@@ -28,7 +28,6 @@ QJsonObject Frequency::toJson() const
     o["enabled"] = enabled;
     o["autoSquelch"] = autoSquelch;
     o["squelchDb"] = squelchDb;
-    o["group"] = group;
     return o;
 }
 
@@ -45,6 +44,5 @@ Frequency Frequency::fromJson(const QJsonObject &obj)
     f.enabled = obj.value("enabled").toBool(true);
     f.autoSquelch = obj.value("autoSquelch").toBool(true);
     f.squelchDb = obj.value("squelchDb").toDouble(-50.0);
-    f.group = obj.value("group").toString();
     return f;
 }

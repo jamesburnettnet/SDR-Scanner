@@ -1,6 +1,5 @@
 #include "FrequencyListModel.h"
 #include <algorithm>
-#include <QSet>
 #include <QColor>
 
 FrequencyListModel::FrequencyListModel(QObject *parent)
@@ -33,14 +32,18 @@ QVariant FrequencyListModel::data(const QModelIndex &index, int role) const
     if (role == Qt::BackgroundRole && !m_activeId.isNull() && f.id == m_activeId)
         return QColor(60, 130, 80); // active-call highlight
 
+    // EditRole returns a numeric double for ColFrequency (not the formatted
+    // display string) so the table's sort proxy -- which sorts on EditRole,
+    // see FrequencyTableView -- orders frequencies numerically instead of
+    // lexicographically (which would put "10.0" before "9.0").
     if (role == Qt::DisplayRole || role == Qt::EditRole) {
         switch (index.column()) {
-            case ColFrequency:  return QString::number(f.mhz(), 'f', 5);
+            case ColFrequency:  return role == Qt::EditRole ? QVariant(f.mhz())
+                                                              : QVariant(QString::number(f.mhz(), 'f', 5));
             case ColLabel:      return f.label;
             case ColModulation: return modulationToString(f.modulation);
             case ColSquelch:    return f.autoSquelch ? QStringLiteral("Auto")
                                                        : QString::number(f.squelchDb, 'f', 1);
-            case ColGroup:      return f.group;
             default: return {};
         }
     }
@@ -67,7 +70,6 @@ bool FrequencyListModel::setData(const QModelIndex &index, const QVariant &value
             case ColFrequency:  f.setMhz(value.toDouble()); break;
             case ColLabel:      f.label = value.toString(); break;
             case ColModulation: f.modulation = modulationFromString(value.toString()); break;
-            case ColGroup:      f.group = value.toString(); break;
             default: return false;
         }
         emit dataChanged(index, index);
@@ -89,7 +91,6 @@ QVariant FrequencyListModel::headerData(int section, Qt::Orientation orientation
         case ColLabel:      return QStringLiteral("Label");
         case ColModulation: return QStringLiteral("Mode");
         case ColSquelch:    return QStringLiteral("Squelch");
-        case ColGroup:      return QStringLiteral("Group");
         default: return {};
     }
 }
@@ -189,15 +190,4 @@ int FrequencyListModel::rowForId(const QUuid &id) const
         if (m_items[i].id == id)
             return i;
     return -1;
-}
-
-QStringList FrequencyListModel::allGroups() const
-{
-    QSet<QString> set;
-    for (const auto &f : m_items)
-        if (!f.group.trimmed().isEmpty())
-            set.insert(f.group.trimmed());
-    QStringList list = set.values();
-    std::sort(list.begin(), list.end());
-    return list;
 }

@@ -10,7 +10,6 @@ struct ActivityLogEntry {
     qint64 freqHz = 0;
     QString label;
     Modulation modulation = Modulation::NFM;
-    QString group;
     qint64 durationMs = 0;
 };
 

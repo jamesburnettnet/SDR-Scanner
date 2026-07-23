@@ -60,7 +60,7 @@ signals:
     // That's what lets the activity log show traffic on a channel other
     // than the one you're currently parked on.
     void activityLogged(QDateTime startTime, qint64 freqHz, QString label, Modulation modulation,
-                         QString group, qint64 durationMs);
+                         qint64 durationMs);
 
 protected:
     void run() override;

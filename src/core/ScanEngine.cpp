@@ -268,7 +268,7 @@ void ScanEngine::onSamples(const std::complex<float> *samples, size_t count)
             if (durationMs >= kMinLoggedDurationMs) {
                 const auto &ch = group.channels[i];
                 emit activityLogged(QDateTime::fromMSecsSinceEpoch(openStartMs[i]), ch.freq.hz, ch.freq.label,
-                                     ch.freq.modulation, ch.freq.group, durationMs);
+                                     ch.freq.modulation, durationMs);
             }
         }
         wasOpen[i] = isOpen;

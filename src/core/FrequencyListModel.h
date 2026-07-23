@@ -16,7 +16,6 @@ public:
         ColLabel,
         ColModulation,
         ColSquelch,
-        ColGroup,
         ColumnCount
     };
 
@@ -38,16 +37,13 @@ public:
     void setItems(const QVector<Frequency> &items);
 
     // Sets enabled/disabled for exactly the given rows (used by Select
-    // All / Deselect All, which only act on whatever's currently visible
-    // under the group filter).
+    // All / Deselect All).
     void setEnabledForRows(const QList<int> &rows, bool enabled);
 
     // Highlights the row for this Frequency id (e.g. during an active
     // call); pass a null QUuid to clear the highlight.
     void setActiveId(const QUuid &id);
     int rowForId(const QUuid &id) const;
-
-    QStringList allGroups() const;
 
 signals:
     void listChanged();

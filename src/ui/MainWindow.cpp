@@ -342,9 +342,8 @@ void MainWindow::wireEngineSignals()
         updateButtonsForState(false);
     });
     connect(m_engine, &ScanEngine::activityLogged, this,
-            [this](QDateTime startTime, qint64 freqHz, QString label, Modulation modulation, QString group,
-                   qint64 durationMs) {
-                m_activityLog->addEntry(startTime, freqHz, label, modulation, group, durationMs);
+            [this](QDateTime startTime, qint64 freqHz, QString label, Modulation modulation, qint64 durationMs) {
+                m_activityLog->addEntry(startTime, freqHz, label, modulation, durationMs);
             });
 
     m_engine->setHumFilterEnabled(m_humFilterEnabled);
