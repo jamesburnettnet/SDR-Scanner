@@ -1,5 +1,6 @@
 #include "SdrDeviceManager.h"
 #include "RtlSdrDevice.h"
+#include "../core/DebugLog.h"
 
 SdrDeviceManager::SdrDeviceManager(QObject *parent)
     : QObject(parent)
@@ -13,6 +14,7 @@ SdrDeviceManager::~SdrDeviceManager()
 
 void SdrDeviceManager::rescan()
 {
+    SDR_LOG("sdr") << "rescan() begin";
     closeDevice();
 
     m_devices.clear();
@@ -24,26 +26,31 @@ void SdrDeviceManager::rescan()
         info.serial = RtlSdrDevice::deviceSerial(i);
         m_devices.append(info);
     }
+    SDR_LOG("sdr") << "rescan() found" << count << "device(s)";
     emit devicesChanged();
 }
 
 bool SdrDeviceManager::openDevice(int deviceIndex)
 {
+    SDR_LOG("sdr") << "openDevice(" << deviceIndex << ")";
     closeDevice();
 
     if (deviceIndex < 0 || deviceIndex >= m_devices.size()) {
+        SDR_LOG("sdr") << "openDevice: invalid index";
         emit errorOccurred(QStringLiteral("Invalid device index"));
         return false;
     }
 
     auto dev = std::make_unique<RtlSdrDevice>();
     if (!dev->open(deviceIndex)) {
+        SDR_LOG("sdr") << "openDevice: open() failed:" << dev->lastError();
         emit errorOccurred(dev->lastError());
         return false;
     }
 
     m_device = std::move(dev);
     m_currentDeviceName = m_devices[deviceIndex].name;
+    SDR_LOG("sdr") << "openDevice: opened" << m_currentDeviceName;
     emit deviceOpened(m_currentDeviceName);
     return true;
 }
@@ -51,6 +58,7 @@ bool SdrDeviceManager::openDevice(int deviceIndex)
 void SdrDeviceManager::closeDevice()
 {
     if (m_device) {
+        SDR_LOG("sdr") << "closeDevice(): closing" << m_currentDeviceName;
         m_device->close();
         m_device.reset();
         m_currentDeviceName.clear();

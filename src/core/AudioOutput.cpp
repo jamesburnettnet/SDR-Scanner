@@ -1,4 +1,5 @@
 #include "AudioOutput.h"
+#include "DebugLog.h"
 #include <QAudioSink>
 #include <QAudioDevice>
 #include <QMediaDevices>
@@ -6,6 +7,31 @@
 #include <algorithm>
 #include <cstring>
 #include <cstdint>
+
+namespace {
+QString audioStateToString(QAudio::State state)
+{
+    switch (state) {
+        case QAudio::ActiveState:  return QStringLiteral("Active");
+        case QAudio::SuspendedState: return QStringLiteral("Suspended");
+        case QAudio::StoppedState: return QStringLiteral("Stopped");
+        case QAudio::IdleState:    return QStringLiteral("Idle (buffer underrun/no data)");
+        default: return QStringLiteral("Unknown(%1)").arg(static_cast<int>(state));
+    }
+}
+
+QString audioErrorToString(QAudio::Error error)
+{
+    switch (error) {
+        case QAudio::NoError:        return QStringLiteral("NoError");
+        case QAudio::OpenError:      return QStringLiteral("OpenError");
+        case QAudio::IOError:        return QStringLiteral("IOError");
+        case QAudio::UnderrunError:  return QStringLiteral("UnderrunError");
+        case QAudio::FatalError:     return QStringLiteral("FatalError");
+        default: return QStringLiteral("Unknown(%1)").arg(static_cast<int>(error));
+    }
+}
+} // namespace
 
 AudioRingBuffer::AudioRingBuffer(QObject *parent)
     : QIODevice(parent)
@@ -79,14 +105,25 @@ void AudioOutput::start()
     format.setSampleFormat(QAudioFormat::Int16);
 
     const QAudioDevice device = QMediaDevices::defaultAudioOutput();
+    SDR_LOG("audio") << "start(): default output device=" << device.description()
+                      << "isNull=" << device.isNull()
+                      << "formatSupported=" << device.isFormatSupported(format);
+
     m_sink = std::make_unique<QAudioSink>(device, format);
+    connect(m_sink.get(), &QAudioSink::stateChanged, this, [this](QAudio::State state) {
+        SDR_LOG("audio") << "QAudioSink stateChanged:" << audioStateToString(state)
+                          << "error=" << audioErrorToString(m_sink->error());
+    });
     m_ringBuffer.open(QIODevice::ReadOnly);
     m_sink->start(&m_ringBuffer);
+    SDR_LOG("audio") << "start(): QAudioSink started, initial state="
+                      << audioStateToString(m_sink->state()) << "error=" << audioErrorToString(m_sink->error());
 }
 
 void AudioOutput::stop()
 {
     if (m_sink) {
+        SDR_LOG("audio") << "stop(): stopping QAudioSink";
         m_sink->stop();
         m_sink.reset();
     }

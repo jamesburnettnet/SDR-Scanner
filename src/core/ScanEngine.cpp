@@ -1,7 +1,9 @@
 #include "ScanEngine.h"
 #include "AudioOutput.h"
+#include "DebugLog.h"
 #include "../sdr/ISdrDevice.h"
 #include <QDebug>
+#include <QThread>
 
 namespace {
 // ~16384 samples per callback at 2.4Msps => ~6.83ms per block.
@@ -49,6 +51,7 @@ void ScanEngine::configure(ISdrDevice *device, AudioOutput *audioOutput, Scanner
 void ScanEngine::requestStop()
 {
     QMutexLocker lock(&m_streamMutex);
+    SDR_LOG("engine") << "requestStop() [thread" << QThread::currentThreadId() << "] streamActive=" << m_streamActive;
     m_stopRequested = true;
     // Deliberately NOT calling m_device->stopStreaming() here. librtlsdr's
     // rtlsdr_cancel_async() is documented (rtl-sdr.h) as safe to call only
@@ -75,6 +78,8 @@ void ScanEngine::requestStop()
 
 void ScanEngine::run()
 {
+    SDR_LOG("engine") << "run() entering [thread" << QThread::currentThreadId() << "] frequencies="
+                       << m_frequencies.size() << "explore=" << m_isExplore;
     if (!m_device || !m_device->isOpen()) {
         emit errorOccurred(QStringLiteral("No SDR device open"));
         return;
@@ -96,6 +101,7 @@ void ScanEngine::run()
 
     m_stage1Coeffs = ChannelProcessor::buildStage1Coeffs();
     buildAllProcessors();
+    SDR_LOG("engine") << "groups built:" << m_groups.size();
 
     m_groupIndex = 0;
     m_blocksInGroup = 0;
@@ -126,22 +132,28 @@ void ScanEngine::run()
             m_streamActive = false;
         }
 
-        if (m_stopRequested)
+        if (m_stopRequested) {
+            SDR_LOG("engine") << "run(): stop requested, exiting loop";
             break;
+        }
 
         if (!m_switchGroupRequested) {
             // Streaming ended without us asking for a stop or a group
             // switch -- most likely the device errored out or was
             // unplugged. Report it and stop instead of spinning in a
             // tight retune/restream retry loop against a dead handle.
+            SDR_LOG("engine") << "run(): streaming ended unexpectedly, lastError=" << m_device->lastError();
             emit errorOccurred(QStringLiteral("SDR streaming stopped unexpectedly: %1").arg(m_device->lastError()));
             break;
         }
 
+        SDR_LOG("engine") << "run(): switching group" << m_groupIndex << "->"
+                           << ((m_groupIndex + 1) % m_groups.size());
         if (m_groups.size() > 1)
             m_groupIndex = (m_groupIndex + 1) % m_groups.size();
     }
 
+    SDR_LOG("engine") << "run() exiting [thread" << QThread::currentThreadId() << "]";
     ScannerSnapshot finalSnap;
     finalSnap.mode = EngineMode::Idle;
     finalSnap.deviceConnected = m_device->isOpen();
@@ -178,6 +190,7 @@ void ScanEngine::buildAllProcessors()
 
 void ScanEngine::requestGroupSwitch()
 {
+    SDR_LOG("engine") << "requestGroupSwitch() [thread" << QThread::currentThreadId() << "]";
     if (m_groups.size() <= 1) {
         // Nothing to switch to -- avoid pointlessly stopping/restarting
         // the stream every dwell period for a single-group scan.
@@ -217,6 +230,7 @@ void ScanEngine::onSamples(const std::complex<float> *samples, size_t count)
         // two more that were already in flight before the cancel takes
         // effect; repeated calls are harmless since they just re-request
         // cancellation on a device that's already stopping.
+        SDR_LOG("engine") << "onSamples(): stop noticed, cancelling from callback thread";
         m_device->stopStreaming();
         return;
     }
@@ -265,6 +279,7 @@ void ScanEngine::onSamples(const std::complex<float> *samples, size_t count)
         if (stillOpen) {
             m_hangBlocks = kHangBlocks;
         } else if (--m_hangBlocks <= 0) {
+            SDR_LOG("engine") << "hang time expired, unlocking channel" << m_lockedChannelIdx;
             m_locked = false;
             m_lockedChannelIdx = -1;
             m_blocksInGroup = 0;
@@ -284,8 +299,12 @@ void ScanEngine::onSamples(const std::complex<float> *samples, size_t count)
                 m_humFilter.process(m_audioScratch);
             }
             m_audioOutput->pushAudio(m_audioScratch);
+        } else if (!m_audioOutput) {
+            SDR_LOG("audio") << "squelch open but m_audioOutput is null -- no audio possible";
         }
     } else if (anyOpen) {
+        SDR_LOG("engine") << "squelch open, locking onto channel" << openIdx << "freqHz="
+                           << group.channels[openIdx].freq.hz;
         m_locked = true;
         m_lockedChannelIdx = openIdx;
         m_hangBlocks = kHangBlocks;

@@ -1,6 +1,7 @@
 #include "FrequencyTableView.h"
 #include "AddFrequencyDialog.h"
 #include "../core/FrequencyListStore.h"
+#include "../core/DebugLog.h"
 #include <QTableView>
 #include <QPushButton>
 #include <QComboBox>
@@ -88,11 +89,17 @@ QList<int> FrequencyTableView::selectedRows() const
 
 void FrequencyTableView::addFrequency()
 {
+    SDR_LOG("ui") << "Add Frequency dialog opened";
     AddFrequencyDialog dlg(this);
     dlg.setExistingGroups(m_model.allGroups());
     wireCalibration(dlg);
-    if (dlg.exec() == QDialog::Accepted)
-        m_model.addFrequency(dlg.frequency());
+    if (dlg.exec() == QDialog::Accepted) {
+        const Frequency f = dlg.frequency();
+        SDR_LOG("ui") << "Frequency added:" << f.hz << "Hz label=" << f.label;
+        m_model.addFrequency(f);
+    } else {
+        SDR_LOG("ui") << "Add Frequency dialog cancelled";
+    }
 }
 
 void FrequencyTableView::editSelected()

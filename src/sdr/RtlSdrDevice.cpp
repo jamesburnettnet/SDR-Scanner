@@ -1,6 +1,8 @@
 #include "RtlSdrDevice.h"
+#include "../core/DebugLog.h"
 #include <rtl-sdr.h>
 #include <cstring>
+#include <QThread>
 
 namespace {
 // librtlsdr delivers unsigned 8-bit offset-binary I/Q; convert to
@@ -44,9 +46,11 @@ QString RtlSdrDevice::deviceSerial(int index)
 bool RtlSdrDevice::open(int deviceIndex)
 {
     close();
+    SDR_LOG("sdr") << "rtlsdr_open(index=" << deviceIndex << ") [thread" << QThread::currentThreadId() << "]";
     const int rc = rtlsdr_open(reinterpret_cast<rtlsdr_dev_t **>(&m_dev), static_cast<uint32_t>(deviceIndex));
     if (rc < 0) {
         m_lastError = QStringLiteral("rtlsdr_open failed (rc=%1)").arg(rc);
+        SDR_LOG("sdr") << m_lastError;
         m_dev = nullptr;
         return false;
     }
@@ -58,6 +62,8 @@ bool RtlSdrDevice::open(int deviceIndex)
 
 void RtlSdrDevice::close()
 {
+    SDR_LOG("sdr") << "RtlSdrDevice::close() [thread" << QThread::currentThreadId() << "] streaming="
+                    << m_streaming.load();
     stopStreaming();
     if (m_dev) {
         rtlsdr_close(reinterpret_cast<rtlsdr_dev_t *>(m_dev));
@@ -132,10 +138,12 @@ bool RtlSdrDevice::startStreaming(SdrSampleCallback callback)
     m_callback = std::move(callback);
     m_streaming = true;
     rtlsdr_reset_buffer(reinterpret_cast<rtlsdr_dev_t *>(m_dev));
+    SDR_LOG("sdr") << "rtlsdr_read_async() entering (blocking) [thread" << QThread::currentThreadId() << "]";
     // Blocks (in the caller's thread) until stopStreaming() -> rtlsdr_cancel_async().
     const int rc = rtlsdr_read_async(reinterpret_cast<rtlsdr_dev_t *>(m_dev), &RtlSdrDevice::rtlsdrCallbackTrampoline,
                                       this, kBufCount, kBufLenBytes);
     m_streaming = false;
+    SDR_LOG("sdr") << "rtlsdr_read_async() returned rc=" << rc << "[thread" << QThread::currentThreadId() << "]";
     if (rc < 0 && rc != -5 /* LIBUSB_ERROR_INTERRUPTED-ish on cancel, backend-dependent */) {
         m_lastError = QStringLiteral("rtlsdr_read_async exited (rc=%1)").arg(rc);
     }
@@ -145,6 +153,8 @@ bool RtlSdrDevice::startStreaming(SdrSampleCallback callback)
 void RtlSdrDevice::stopStreaming()
 {
     if (m_dev && m_streaming) {
+        SDR_LOG("sdr") << "rtlsdr_cancel_async() [thread" << QThread::currentThreadId() << "]"
+                        << "-- must match the thread rtlsdr_read_async() is blocked on, or this is unsafe";
         rtlsdr_cancel_async(reinterpret_cast<rtlsdr_dev_t *>(m_dev));
     }
 }

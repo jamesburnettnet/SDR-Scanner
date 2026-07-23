@@ -93,6 +93,8 @@ set(APP_SOURCES
     src/core/ActivityLogModel.cpp
     src/core/HumFilter.h
     src/core/HumFilter.cpp
+    src/core/DebugLog.h
+    src/core/DebugLog.cpp
 
     src/sdr/ISdrDevice.h
     src/sdr/RtlSdrDevice.h

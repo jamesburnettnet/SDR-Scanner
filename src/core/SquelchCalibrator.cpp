@@ -1,7 +1,9 @@
 #include "SquelchCalibrator.h"
 #include "ChannelProcessor.h"
 #include "ScanGroup.h"
+#include "DebugLog.h"
 #include "../sdr/ISdrDevice.h"
+#include <QThread>
 
 namespace {
 // ~16384 samples per callback at 2.4Msps => ~6.83ms per block; ~60 blocks
@@ -15,6 +17,8 @@ SquelchCalibrator::SquelchCalibrator(QObject *parent)
 {
 }
 
+SquelchCalibrator::~SquelchCalibrator() = default;
+
 void SquelchCalibrator::configure(ISdrDevice *device, qint64 freqHz, Modulation modulation)
 {
     m_device = device;
@@ -24,6 +28,7 @@ void SquelchCalibrator::configure(ISdrDevice *device, qint64 freqHz, Modulation 
 
 void SquelchCalibrator::run()
 {
+    SDR_LOG("calib") << "run() entering [thread" << QThread::currentThreadId() << "] freqHz=" << m_freqHz;
     if (!m_device || !m_device->isOpen()) {
         emit calibrationFinished(false, 0.0, 0.0, QStringLiteral("No SDR device open"));
         return;
@@ -38,30 +43,33 @@ void SquelchCalibrator::run()
     m_device->setGainMode(true);
 
     auto stage1 = ChannelProcessor::buildStage1Coeffs();
-    ChannelProcessor proc(ScanGrouping::kDeviceSampleRateHz, 0, m_modulation, stage1);
+    m_proc = std::make_unique<ChannelProcessor>(ScanGrouping::kDeviceSampleRateHz, 0, m_modulation, stage1);
     // Manual, effectively-never-open threshold: we only read lastPowerDb(),
     // squelch state itself is irrelevant here.
-    proc.setSquelchManual(0.0);
+    m_proc->setSquelchManual(0.0);
 
-    int blocksReceived = 0;
-    double sumDb = 0.0;
-    std::vector<float> scratch;
+    m_blocksReceived = 0;
+    m_sumDb = 0.0;
+    m_scratch.clear();
 
-    m_device->startStreaming([&](const std::complex<float> *samples, size_t count) {
-        if (blocksReceived >= kCalibrationBlocks)
+    // Captures [this], not a reference to run()'s stack locals -- see the
+    // comment on the member fields in SquelchCalibrator.h for why.
+    m_device->startStreaming([this](const std::complex<float> *samples, size_t count) {
+        if (m_blocksReceived >= kCalibrationBlocks)
             return;
-        proc.process(samples, count, false, scratch);
-        sumDb += proc.lastPowerDb();
-        ++blocksReceived;
-        if (blocksReceived >= kCalibrationBlocks)
+        m_proc->process(samples, count, false, m_scratch);
+        m_sumDb += m_proc->lastPowerDb();
+        ++m_blocksReceived;
+        if (m_blocksReceived >= kCalibrationBlocks)
             m_device->stopStreaming();
     });
 
-    if (blocksReceived == 0) {
+    SDR_LOG("calib") << "run(): streaming ended, blocksReceived=" << m_blocksReceived;
+    if (m_blocksReceived == 0) {
         emit calibrationFinished(false, 0.0, 0.0, QStringLiteral("No samples captured"));
         return;
     }
 
-    const double noiseFloorDb = sumDb / blocksReceived;
+    const double noiseFloorDb = m_sumDb / m_blocksReceived;
     emit calibrationFinished(true, noiseFloorDb, noiseFloorDb + kMarginDb, QString());
 }

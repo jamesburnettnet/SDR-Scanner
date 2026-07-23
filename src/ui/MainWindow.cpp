@@ -11,6 +11,7 @@
 #include "../core/ScanEngine.h"
 #include "../core/SquelchCalibrator.h"
 #include "../core/FrequencyListStore.h"
+#include "../core/DebugLog.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -135,6 +136,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_deviceBar, &DeviceBar::connectRequested, this, &MainWindow::onDeviceConnectRequested);
     connect(m_deviceBar, &DeviceBar::disconnectRequested, this, &MainWindow::onDeviceDisconnectRequested);
     connect(m_deviceBar, &DeviceBar::detectRequested, this, [this]() {
+        SDR_LOG("ui") << "Detect clicked";
         // Stop any active scan first: rescanning closes the currently open
         // device, and doing that while ScanEngine's worker thread is still
         // blocked inside the device's async read call would race with
@@ -166,11 +168,14 @@ MainWindow::MainWindow(QWidget *parent)
 
     m_freqTable->setCalibrationHandler([this](qint64 freqHz, Modulation mod,
                                                FrequencyTableView::CalibrationResultFn onDone) {
+        SDR_LOG("ui") << "Auto Tune requested, freqHz=" << freqHz;
         if (m_engine) {
+            SDR_LOG("ui") << "Auto Tune blocked: scan engine still running";
             onDone(false, 0.0, 0.0, QStringLiteral("Stop scanning before using Auto Tune."));
             return;
         }
         if (!m_deviceManager->isDeviceOpen()) {
+            SDR_LOG("ui") << "Auto Tune blocked: no device open";
             onDone(false, 0.0, 0.0, QStringLiteral("No SDR device open. Use Detect first."));
             return;
         }
@@ -178,10 +183,13 @@ MainWindow::MainWindow(QWidget *parent)
         auto *calibrator = new SquelchCalibrator(this);
         connect(calibrator, &SquelchCalibrator::calibrationFinished, this,
                 [onDone](bool ok, double noiseFloorDb, double suggestedDb, const QString &error) {
+                    SDR_LOG("calib") << "calibrationFinished ok=" << ok << "noiseFloorDb=" << noiseFloorDb
+                                      << "suggestedDb=" << suggestedDb << "error=" << error;
                     onDone(ok, noiseFloorDb, suggestedDb, error);
                 });
         connect(calibrator, &QThread::finished, calibrator, &QObject::deleteLater);
         calibrator->configure(m_deviceManager->device(), freqHz, mod);
+        SDR_LOG("calib") << "Starting SquelchCalibrator thread";
         calibrator->start();
     });
 
@@ -204,19 +212,23 @@ void MainWindow::closeEvent(QCloseEvent *event)
 
 void MainWindow::onDeviceConnectRequested(int index)
 {
+    SDR_LOG("ui") << "Connect requested, index=" << index;
     // Make sure the scan thread isn't still using the device before we
     // touch it (see the comment on the Detect handler above for why).
     stopScan();
 
     if (!m_deviceManager->openDevice(index)) {
+        SDR_LOG("ui") << "Device open failed";
         statusBar()->showMessage(QStringLiteral("Failed to open device"), 6000);
     } else {
+        SDR_LOG("ui") << "Device open OK:" << m_deviceManager->currentDeviceName();
         statusBar()->showMessage(QStringLiteral("Device connected: %1").arg(m_deviceManager->currentDeviceName()), 4000);
     }
 }
 
 void MainWindow::onDeviceDisconnectRequested()
 {
+    SDR_LOG("ui") << "Disconnect requested";
     stopScan();
     m_deviceManager->closeDevice();
     statusBar()->showMessage(QStringLiteral("Device disconnected"), 4000);
@@ -224,6 +236,7 @@ void MainWindow::onDeviceDisconnectRequested()
 
 void MainWindow::onExploreClicked()
 {
+    SDR_LOG("ui") << "Explore... clicked";
     ExploreDialog dlg(this);
     if (dlg.exec() != QDialog::Accepted)
         return;
@@ -240,6 +253,7 @@ void MainWindow::onExploreClicked()
         return;
     }
 
+    SDR_LOG("ui") << "Starting explore engine, sweep points=" << sweep.size();
     m_engine = new ScanEngine(this);
     wireEngineSignals();
     m_engine->configure(m_deviceManager->device(), m_audioOutput, &m_stateHolder, sweep, true);
@@ -254,6 +268,7 @@ void MainWindow::startScan(bool explore)
 {
     Q_UNUSED(explore);
 
+    SDR_LOG("ui") << "Start Scan clicked";
     if (!m_deviceManager->isDeviceOpen()) {
         QMessageBox::warning(this, QStringLiteral("Scan"), QStringLiteral("No SDR device open. Use Detect first."));
         return;
@@ -268,6 +283,7 @@ void MainWindow::startScan(bool explore)
 
     stopScan();
 
+    SDR_LOG("ui") << "Starting scan engine, enabled frequencies=" << freqs.size();
     m_engine = new ScanEngine(this);
     wireEngineSignals();
     m_engine->configure(m_deviceManager->device(), m_audioOutput, &m_stateHolder, freqs, false);
@@ -278,10 +294,14 @@ void MainWindow::startScan(bool explore)
 
 void MainWindow::stopScan()
 {
-    if (!m_engine)
+    if (!m_engine) {
+        SDR_LOG("ui") << "stopScan: no engine running, no-op";
         return;
+    }
+    SDR_LOG("ui") << "stopScan: requesting stop and waiting for scan thread to exit";
     m_engine->requestStop();
     m_engine->wait();
+    SDR_LOG("ui") << "stopScan: scan thread exited";
     m_engine->deleteLater();
     m_engine = nullptr;
     updateButtonsForState(false);
@@ -291,9 +311,13 @@ void MainWindow::stopScan()
 void MainWindow::wireEngineSignals()
 {
     connect(m_engine, &ScanEngine::errorOccurred, this, [this](const QString &msg) {
+        SDR_LOG("engine") << "errorOccurred:" << msg;
         statusBar()->showMessage(msg, 6000);
     });
-    connect(m_engine, &QThread::finished, this, [this]() { updateButtonsForState(false); });
+    connect(m_engine, &QThread::finished, this, [this]() {
+        SDR_LOG("engine") << "QThread::finished";
+        updateButtonsForState(false);
+    });
     connect(m_engine, &ScanEngine::activityLogged, this,
             [this](QDateTime startTime, qint64 freqHz, QString label, Modulation modulation, QString group,
                    qint64 durationMs) {
