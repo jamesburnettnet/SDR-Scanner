@@ -1,6 +1,6 @@
 # Version
 
-Current version: **0.0.3**
+Current version: **0.1.0**
 
 ## Where the version is coded
 
