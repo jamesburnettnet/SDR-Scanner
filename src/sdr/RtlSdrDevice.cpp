@@ -62,26 +62,21 @@ bool RtlSdrDevice::open(int deviceIndex)
 
 void RtlSdrDevice::close()
 {
+    // hasStreamed is kept purely for diagnostic logging now (see git
+    // history for why it briefly gated skipping rtlsdr_close() entirely --
+    // that dodged a crash caused by the old design's repeated
+    // cancel/restream cycles, but leaking the handle meant its USB
+    // interface claim was never released, breaking the *next* rtlsdr_open()
+    // on the same device with usb_open error -3. Now that ScanEngine keeps
+    // one continuous stream per session (see its class comment) and only
+    // cancels once, the specific in-flight-transfer-free race that crashed
+    // rtlsdr_close() may no longer trigger at all, so call it normally
+    // again and actually release the device.
     SDR_LOG("sdr") << "RtlSdrDevice::close() [thread" << QThread::currentThreadId() << "] streaming="
                     << m_streaming.load() << "hasStreamed=" << m_hasStreamed.load();
     stopStreaming();
     if (m_dev) {
-        if (m_hasStreamed) {
-            // librtlsdr's rtlsdr_close() calls rtlsdr_deinit_baseband(),
-            // which issues further USB control transfers on the same
-            // device -- confirmed via --debug logs (two independent
-            // repros) that this reliably crashes the vendored Windows
-            // build when called on a handle that has ever run an async
-            // streaming session, even after a single, correctly-issued,
-            // same-thread cancel with no error. Opening a *new* handle on
-            // the same device index afterwards works fine every time, so
-            // deliberately leak this handle instead of calling
-            // rtlsdr_close() on it -- the OS reclaims it when the process
-            // exits, and it doesn't block reopening the same device.
-            SDR_LOG("sdr") << "close(): device has streamed -- leaking handle instead of calling rtlsdr_close()";
-        } else {
-            rtlsdr_close(reinterpret_cast<rtlsdr_dev_t *>(m_dev));
-        }
+        rtlsdr_close(reinterpret_cast<rtlsdr_dev_t *>(m_dev));
         m_dev = nullptr;
     }
 }
