@@ -22,13 +22,24 @@ class AudioOutput;
 // current group at once (the speed win from grouping) before deciding to
 // dwell, lock onto a channel, or advance to the next group.
 //
-// Retuning always happens *between* streaming sessions, never from inside
-// the async read callback: interleaving a blocking tuner I2C command with
-// an active USB bulk sample stream is a well-known source of tuner
-// timeouts (librtlsdr's "i2c wr failed" / "r82xx_set_freq: failed"
-// messages). So each group switch briefly stops streaming, retunes, then
-// restarts it, keeping control transfers and bulk streaming fully
-// separated in time.
+// The async stream is started exactly once per scan session and kept
+// running continuously for its entire duration -- group switches retune
+// the center frequency live (via retuneRequested(), a queued cross-thread
+// call to the GUI thread) instead of stopping and restarting the stream.
+// This isn't just an efficiency choice: the vendored Windows librtlsdr
+// build's rtlsdr_read_async() has a real bug where its cancel path can
+// free USB transfer buffers that libusb still considers in-flight,
+// corrupting the heap in a way that surfaces on a *later*, unrelated
+// call. Stopping/restarting the stream on every group switch (the
+// previous design) hit that bug within a few switches on any multi-group
+// scan; only cancelling once, at actual scan stop, avoids it.
+// setCenterFrequency() itself is a separate USB control transfer (not the
+// bulk streaming endpoint) and safe to call concurrently from another
+// thread while the scan thread stays blocked in the streaming call --
+// calling it reentrantly from *within* the streaming callback itself,
+// on the other hand, would be a libusb reentrancy hazard (calling into
+// its event-handling machinery from inside a callback it's already
+// dispatching), hence doing it from the GUI thread instead.
 //
 // Reused for both regular scanning and Explore mode: Explore just supplies
 // a synthetic frequency list generated from a start/end/step sweep.
@@ -60,7 +71,13 @@ signals:
     // That's what lets the activity log show traffic on a channel other
     // than the one you're currently parked on.
     void activityLogged(QDateTime startTime, qint64 freqHz, QString label, Modulation modulation,
-                         QString group, qint64 durationMs);
+                         qint64 durationMs);
+
+    // Internal: emitted from onSamples() (scan thread) on a group switch,
+    // connected to performRetune() (GUI thread, this object's own thread
+    // affinity) so the actual setCenterFrequency() call happens off the
+    // scan thread -- see the class comment for why.
+    void retuneRequested(quint64 centerHz);
 
 protected:
     void run() override;
@@ -70,6 +87,7 @@ private:
     void buildAllProcessors();
     void requestGroupSwitch();
     void publishSnapshot();
+    void performRetune(quint64 centerHz);
 
     ISdrDevice *m_device = nullptr;
     AudioOutput *m_audioOutput = nullptr;
@@ -120,14 +138,13 @@ private:
     HumFilter m_humFilter;
     int m_humFilterConfiguredHz = 0;
 
-    // Guards the handoff between "setting up the next streaming session"
-    // and requestStop() potentially arriving from the GUI thread at the
-    // same time -- without this, a stop request that lands in the brief
-    // gap between streaming sessions (when device->stopStreaming() would
-    // be a no-op because nothing is streaming yet) could be missed
-    // entirely, leaving the Stop button hung waiting on a thread that just
-    // went on to start yet another blocking read.
+    // Guards the handoff between "setting up the streaming session" and
+    // requestStop() potentially arriving from the GUI thread at the same
+    // moment -- without this, a stop request that lands in the brief gap
+    // before streaming actually starts (when device->stopStreaming()
+    // would be a no-op because nothing is streaming yet) could be missed
+    // entirely, leaving the Stop button hung waiting on a thread that goes
+    // on to start the blocking read anyway.
     QMutex m_streamMutex;
     bool m_streamActive = false;
-    bool m_switchGroupRequested = false;
 };

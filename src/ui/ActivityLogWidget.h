@@ -14,7 +14,7 @@ public:
     explicit ActivityLogWidget(QWidget *parent = nullptr);
 
     void addEntry(const QDateTime &startTime, qint64 freqHz, const QString &label, Modulation modulation,
-                  const QString &group, qint64 durationMs);
+                  qint64 durationMs);
 
 private:
     ActivityLogModel m_model;

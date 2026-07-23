@@ -7,11 +7,11 @@
 
 class QTableView;
 class QPushButton;
-class QComboBox;
 class AddFrequencyDialog;
 
 // Composite widget: the frequency table plus Add/Edit/Delete/Import/Export
-// controls and a group filter. Owns the FrequencyListModel.
+// controls. Owns the FrequencyListModel. Sortable by clicking a column
+// header (e.g. Frequency or Label).
 class FrequencyTableView : public QWidget {
     Q_OBJECT
 public:
@@ -45,8 +45,6 @@ private:
     void deleteSelected();
     void importList();
     void exportList();
-    void refreshGroupFilter();
-    void applyGroupFilter();
     void wireCalibration(AddFrequencyDialog &dlg);
     QList<int> visibleRows() const;
     void setEnabledForVisible(bool enabled);
@@ -54,6 +52,5 @@ private:
     FrequencyListModel m_model;
     QSortFilterProxyModel m_proxy;
     QTableView *m_table;
-    QComboBox *m_groupFilter;
     CalibrationRequestFn m_calibrationFn;
 };

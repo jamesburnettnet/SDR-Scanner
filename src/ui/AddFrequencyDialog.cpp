@@ -62,10 +62,6 @@ AddFrequencyDialog::AddFrequencyDialog(QWidget *parent)
     m_calibrationLabel = new QLabel(this);
     m_calibrationLabel->setStyleSheet(QStringLiteral("color: #666;"));
 
-    m_groupCombo = new QComboBox(this);
-    m_groupCombo->setEditable(true);
-    m_groupCombo->setPlaceholderText(QStringLiteral("(none)"));
-
     auto *form = new QFormLayout;
     form->addRow(QStringLiteral("Frequency:"), m_mhzSpin);
     form->addRow(QStringLiteral("Label:"), m_labelEdit);
@@ -73,7 +69,6 @@ AddFrequencyDialog::AddFrequencyDialog(QWidget *parent)
     form->addRow(QString(), m_autoSquelchCheck);
     form->addRow(QStringLiteral("Squelch:"), squelchRow);
     form->addRow(QString(), m_calibrationLabel);
-    form->addRow(QStringLiteral("Group:"), m_groupCombo);
 
     m_buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     connect(m_buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
@@ -82,15 +77,6 @@ AddFrequencyDialog::AddFrequencyDialog(QWidget *parent)
     auto *layout = new QVBoxLayout(this);
     layout->addLayout(form);
     layout->addWidget(m_buttons);
-}
-
-void AddFrequencyDialog::setExistingGroups(const QStringList &groups)
-{
-    const QString current = m_groupCombo->currentText();
-    m_groupCombo->clear();
-    m_groupCombo->addItem(QString());
-    m_groupCombo->addItems(groups);
-    m_groupCombo->setCurrentText(current);
 }
 
 void AddFrequencyDialog::setFrequency(const Frequency &f)
@@ -102,7 +88,6 @@ void AddFrequencyDialog::setFrequency(const Frequency &f)
     m_autoSquelchCheck->setChecked(f.autoSquelch);
     m_squelchSpin->setValue(f.squelchDb);
     m_squelchSpin->setEnabled(!f.autoSquelch);
-    m_groupCombo->setCurrentText(f.group);
 }
 
 Frequency AddFrequencyDialog::frequency() const
@@ -115,7 +100,6 @@ Frequency AddFrequencyDialog::frequency() const
     f.modulation = modulationFromString(m_modulationCombo->currentText());
     f.autoSquelch = m_autoSquelchCheck->isChecked();
     f.squelchDb = m_squelchSpin->value();
-    f.group = m_groupCombo->currentText().trimmed();
     f.enabled = true;
     return f;
 }

@@ -1,6 +1,8 @@
 #include "RtlSdrDevice.h"
+#include "../core/DebugLog.h"
 #include <rtl-sdr.h>
 #include <cstring>
+#include <QThread>
 
 namespace {
 // librtlsdr delivers unsigned 8-bit offset-binary I/Q; convert to
@@ -44,9 +46,11 @@ QString RtlSdrDevice::deviceSerial(int index)
 bool RtlSdrDevice::open(int deviceIndex)
 {
     close();
+    SDR_LOG("sdr") << "rtlsdr_open(index=" << deviceIndex << ") [thread" << QThread::currentThreadId() << "]";
     const int rc = rtlsdr_open(reinterpret_cast<rtlsdr_dev_t **>(&m_dev), static_cast<uint32_t>(deviceIndex));
     if (rc < 0) {
         m_lastError = QStringLiteral("rtlsdr_open failed (rc=%1)").arg(rc);
+        SDR_LOG("sdr") << m_lastError;
         m_dev = nullptr;
         return false;
     }
@@ -58,6 +62,18 @@ bool RtlSdrDevice::open(int deviceIndex)
 
 void RtlSdrDevice::close()
 {
+    // hasStreamed is kept purely for diagnostic logging now (see git
+    // history for why it briefly gated skipping rtlsdr_close() entirely --
+    // that dodged a crash caused by the old design's repeated
+    // cancel/restream cycles, but leaking the handle meant its USB
+    // interface claim was never released, breaking the *next* rtlsdr_open()
+    // on the same device with usb_open error -3. Now that ScanEngine keeps
+    // one continuous stream per session (see its class comment) and only
+    // cancels once, the specific in-flight-transfer-free race that crashed
+    // rtlsdr_close() may no longer trigger at all, so call it normally
+    // again and actually release the device.
+    SDR_LOG("sdr") << "RtlSdrDevice::close() [thread" << QThread::currentThreadId() << "] streaming="
+                    << m_streaming.load() << "hasStreamed=" << m_hasStreamed.load();
     stopStreaming();
     if (m_dev) {
         rtlsdr_close(reinterpret_cast<rtlsdr_dev_t *>(m_dev));
@@ -131,11 +147,15 @@ bool RtlSdrDevice::startStreaming(SdrSampleCallback callback)
     if (!m_dev) return false;
     m_callback = std::move(callback);
     m_streaming = true;
+    m_cancelRequested = false;
+    m_hasStreamed = true;
     rtlsdr_reset_buffer(reinterpret_cast<rtlsdr_dev_t *>(m_dev));
+    SDR_LOG("sdr") << "rtlsdr_read_async() entering (blocking) [thread" << QThread::currentThreadId() << "]";
     // Blocks (in the caller's thread) until stopStreaming() -> rtlsdr_cancel_async().
     const int rc = rtlsdr_read_async(reinterpret_cast<rtlsdr_dev_t *>(m_dev), &RtlSdrDevice::rtlsdrCallbackTrampoline,
                                       this, kBufCount, kBufLenBytes);
     m_streaming = false;
+    SDR_LOG("sdr") << "rtlsdr_read_async() returned rc=" << rc << "[thread" << QThread::currentThreadId() << "]";
     if (rc < 0 && rc != -5 /* LIBUSB_ERROR_INTERRUPTED-ish on cancel, backend-dependent */) {
         m_lastError = QStringLiteral("rtlsdr_read_async exited (rc=%1)").arg(rc);
     }
@@ -144,9 +164,26 @@ bool RtlSdrDevice::startStreaming(SdrSampleCallback callback)
 
 void RtlSdrDevice::stopStreaming()
 {
-    if (m_dev && m_streaming) {
-        rtlsdr_cancel_async(reinterpret_cast<rtlsdr_dev_t *>(m_dev));
-    }
+    if (!m_dev || !m_streaming)
+        return;
+
+    // ScanEngine's onSamples() calls this once per incoming block for as
+    // long as m_streaming stays true, i.e. potentially a dozen-plus times
+    // in a row while rtlsdr_read_async() unwinds -- this used to be assumed
+    // harmless ("repeated calls just re-request cancellation"), but the
+    // vendored Windows build's rtlsdr_cancel_async() is not safe to call
+    // again while a cancel is already in flight: --debug logs showed 15-17
+    // back-to-back calls followed by a crash on the *next* rtlsdr_* call on
+    // the same handle (including plain rtlsdr_close()), the signature of
+    // heap corruption from a double-cancel/double-free inside the DLL, not
+    // a stale-handle issue. Only the first call per session actually
+    // issues the cancel; later ones are no-ops.
+    bool expected = false;
+    if (!m_cancelRequested.compare_exchange_strong(expected, true))
+        return;
+
+    SDR_LOG("sdr") << "rtlsdr_cancel_async() [thread" << QThread::currentThreadId() << "]";
+    rtlsdr_cancel_async(reinterpret_cast<rtlsdr_dev_t *>(m_dev));
 }
 
 QString RtlSdrDevice::lastError() const

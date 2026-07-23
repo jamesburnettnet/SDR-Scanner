@@ -42,5 +42,13 @@ private:
     SdrSampleCallback m_callback;
     std::vector<std::complex<float>> m_convertBuf;
     std::atomic<bool> m_streaming{false};
+    // Set once rtlsdr_cancel_async() has been issued for the in-progress
+    // streaming session -- see the comment in stopStreaming() for why it
+    // must not be called more than once per session.
+    std::atomic<bool> m_cancelRequested{false};
+    // Set the first time this handle starts an async streaming session --
+    // see the comment in close() for why a handle that has ever streamed
+    // must never be passed to rtlsdr_close() again.
+    std::atomic<bool> m_hasStreamed{false};
     QString m_lastError;
 };

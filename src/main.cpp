@@ -2,6 +2,7 @@
 #include <QDebug>
 #include "ui/MainWindow.h"
 #include "core/Frequency.h"
+#include "core/DebugLog.h"
 
 int main(int argc, char *argv[])
 {
@@ -14,10 +15,18 @@ int main(int argc, char *argv[])
     qRegisterMetaType<Modulation>("Modulation");
 
     bool selfTest = false;
+    bool debugLogging = false;
     for (int i = 1; i < argc; ++i) {
-        if (QString::fromLocal8Bit(argv[i]) == QStringLiteral("--test"))
+        const QString arg = QString::fromLocal8Bit(argv[i]);
+        if (arg == QStringLiteral("--test"))
             selfTest = true;
+        else if (arg == QStringLiteral("--debug"))
+            debugLogging = true;
     }
+    DebugLog::setEnabled(debugLogging);
+    if (debugLogging)
+        qInfo() << "Debug logging enabled (--debug): UI actions, device open/close, scan "
+                   "engine lifecycle, and audio sink state will be logged to stderr.";
 
     MainWindow window;
 

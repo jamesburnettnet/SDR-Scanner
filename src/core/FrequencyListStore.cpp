@@ -58,8 +58,7 @@ bool loadJson(const QString &path, QVector<Frequency> &frequenciesOut, QString *
     return true;
 }
 
-bool exportCsv(const QString &path, const QVector<Frequency> &frequencies,
-                const QStringList &groups, QString *errorOut)
+bool exportCsv(const QString &path, const QVector<Frequency> &frequencies, QString *errorOut)
 {
     QFile file(path);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
@@ -68,17 +67,13 @@ bool exportCsv(const QString &path, const QVector<Frequency> &frequencies,
     }
 
     QTextStream out(&file);
-    out << "Label,Frequency_MHz,Modulation,Squelch,Group,Enabled\n";
+    out << "Label,Frequency_MHz,Modulation,Squelch,Enabled\n";
     for (const auto &f : frequencies) {
-        if (!groups.isEmpty() && !groups.contains(f.group))
-            continue;
         QString label = f.label;
         label.replace('"', "'");
-        QString group = f.group;
-        group.replace('"', "'");
         const QString squelch = f.autoSquelch ? QStringLiteral("Auto") : QString::number(f.squelchDb, 'f', 1);
         out << '"' << label << "\"," << QString::number(f.mhz(), 'f', 5) << ','
-            << modulationToString(f.modulation) << ',' << squelch << ',' << '"' << group << "\","
+            << modulationToString(f.modulation) << ',' << squelch << ','
             << (f.enabled ? "1" : "0") << '\n';
     }
     return true;

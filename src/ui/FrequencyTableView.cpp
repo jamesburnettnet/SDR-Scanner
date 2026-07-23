@@ -1,21 +1,23 @@
 #include "FrequencyTableView.h"
 #include "AddFrequencyDialog.h"
 #include "../core/FrequencyListStore.h"
+#include "../core/DebugLog.h"
 #include <QTableView>
 #include <QPushButton>
-#include <QComboBox>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QFileDialog>
 #include <QMessageBox>
-#include <QLabel>
 
 FrequencyTableView::FrequencyTableView(QWidget *parent)
     : QWidget(parent)
 {
     m_proxy.setSourceModel(&m_model);
-    m_proxy.setFilterKeyColumn(FrequencyListModel::ColGroup);
+    // Sort on EditRole, not the default DisplayRole: FrequencyListModel
+    // returns a numeric double for ColFrequency under EditRole so "9 MHz"
+    // sorts before "10 MHz" instead of lexicographically after it.
+    m_proxy.setSortRole(Qt::EditRole);
 
     m_table = new QTableView(this);
     m_table->setModel(&m_proxy);
@@ -34,18 +36,13 @@ FrequencyTableView::FrequencyTableView(QWidget *parent)
     auto *exportBtn = new QPushButton(QStringLiteral("Export..."), this);
     auto *selectAllBtn = new QPushButton(QStringLiteral("Select All"), this);
     auto *deselectAllBtn = new QPushButton(QStringLiteral("Deselect All"), this);
-    selectAllBtn->setToolTip(QStringLiteral("Enable all frequencies currently shown (respects the group filter)"));
-    deselectAllBtn->setToolTip(QStringLiteral("Disable all frequencies currently shown (respects the group filter)"));
+    selectAllBtn->setToolTip(QStringLiteral("Enable all frequencies"));
+    deselectAllBtn->setToolTip(QStringLiteral("Disable all frequencies"));
 
-    m_groupFilter = new QComboBox(this);
-    m_groupFilter->addItem(QStringLiteral("All groups"));
-
-    auto *filterRow = new QHBoxLayout;
-    filterRow->addWidget(new QLabel(QStringLiteral("Filter:"), this));
-    filterRow->addWidget(m_groupFilter);
-    filterRow->addStretch(1);
-    filterRow->addWidget(selectAllBtn);
-    filterRow->addWidget(deselectAllBtn);
+    auto *selectionRow = new QHBoxLayout;
+    selectionRow->addStretch(1);
+    selectionRow->addWidget(selectAllBtn);
+    selectionRow->addWidget(deselectAllBtn);
 
     auto *buttonRow = new QHBoxLayout;
     buttonRow->addWidget(addBtn);
@@ -56,7 +53,7 @@ FrequencyTableView::FrequencyTableView(QWidget *parent)
     buttonRow->addWidget(exportBtn);
 
     auto *layout = new QVBoxLayout(this);
-    layout->addLayout(filterRow);
+    layout->addLayout(selectionRow);
     layout->addWidget(m_table, 1);
     layout->addLayout(buttonRow);
 
@@ -68,13 +65,7 @@ FrequencyTableView::FrequencyTableView(QWidget *parent)
     connect(selectAllBtn, &QPushButton::clicked, this, [this]() { setEnabledForVisible(true); });
     connect(deselectAllBtn, &QPushButton::clicked, this, [this]() { setEnabledForVisible(false); });
     connect(m_table, &QTableView::doubleClicked, this, [this](const QModelIndex &) { editSelected(); });
-    connect(m_groupFilter, &QComboBox::currentTextChanged, this, [this](const QString &) { applyGroupFilter(); });
-    connect(&m_model, &FrequencyListModel::listChanged, this, [this]() {
-        refreshGroupFilter();
-        emit listChanged();
-    });
-
-    refreshGroupFilter();
+    connect(&m_model, &FrequencyListModel::listChanged, this, &FrequencyTableView::listChanged);
 }
 
 QList<int> FrequencyTableView::selectedRows() const
@@ -88,11 +79,16 @@ QList<int> FrequencyTableView::selectedRows() const
 
 void FrequencyTableView::addFrequency()
 {
+    SDR_LOG("ui") << "Add Frequency dialog opened";
     AddFrequencyDialog dlg(this);
-    dlg.setExistingGroups(m_model.allGroups());
     wireCalibration(dlg);
-    if (dlg.exec() == QDialog::Accepted)
-        m_model.addFrequency(dlg.frequency());
+    if (dlg.exec() == QDialog::Accepted) {
+        const Frequency f = dlg.frequency();
+        SDR_LOG("ui") << "Frequency added:" << f.hz << "Hz label=" << f.label;
+        m_model.addFrequency(f);
+    } else {
+        SDR_LOG("ui") << "Add Frequency dialog cancelled";
+    }
 }
 
 void FrequencyTableView::editSelected()
@@ -103,7 +99,6 @@ void FrequencyTableView::editSelected()
     const int row = rows.first();
 
     AddFrequencyDialog dlg(this);
-    dlg.setExistingGroups(m_model.allGroups());
     dlg.setFrequency(m_model.at(row));
     wireCalibration(dlg);
     if (dlg.exec() == QDialog::Accepted)
@@ -161,46 +156,14 @@ void FrequencyTableView::exportList()
     if (path.isEmpty())
         return;
 
-    QStringList groups;
-    if (m_groupFilter->currentIndex() > 0)
-        groups << m_groupFilter->currentText();
-
     QString error;
     bool ok;
-    if (path.endsWith(QStringLiteral(".json"), Qt::CaseInsensitive)) {
-        QVector<Frequency> toExport;
-        for (const auto &f : m_model.items())
-            if (groups.isEmpty() || groups.contains(f.group))
-                toExport.append(f);
-        ok = FrequencyListStore::saveJson(path, toExport, &error);
-    } else {
-        ok = FrequencyListStore::exportCsv(path, m_model.items(), groups, &error);
-    }
+    if (path.endsWith(QStringLiteral(".json"), Qt::CaseInsensitive))
+        ok = FrequencyListStore::saveJson(path, m_model.items(), &error);
+    else
+        ok = FrequencyListStore::exportCsv(path, m_model.items(), &error);
     if (!ok)
         QMessageBox::warning(this, QStringLiteral("Export Failed"), error);
-}
-
-void FrequencyTableView::refreshGroupFilter()
-{
-    const QString current = m_groupFilter->currentText();
-    m_groupFilter->blockSignals(true);
-    m_groupFilter->clear();
-    m_groupFilter->addItem(QStringLiteral("All groups"));
-    m_groupFilter->addItems(m_model.allGroups());
-    const int idx = m_groupFilter->findText(current);
-    m_groupFilter->setCurrentIndex(idx >= 0 ? idx : 0);
-    m_groupFilter->blockSignals(false);
-    applyGroupFilter();
-}
-
-void FrequencyTableView::applyGroupFilter()
-{
-    if (m_groupFilter->currentIndex() <= 0) {
-        m_proxy.setFilterFixedString(QString());
-    } else {
-        m_proxy.setFilterRegularExpression(
-            QRegularExpression(QStringLiteral("^%1$").arg(QRegularExpression::escape(m_groupFilter->currentText()))));
-    }
 }
 
 QList<int> FrequencyTableView::visibleRows() const

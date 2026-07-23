@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.19)
-project(SdrScanner VERSION 0.1.0 LANGUAGES CXX)
+project(SdrScanner VERSION 0.2.0 LANGUAGES CXX)
 
 # APP_VERSION overrides the package/display version independently of the
 # project()-declared version above (which is just the source-tree fallback
@@ -93,6 +93,8 @@ set(APP_SOURCES
     src/core/ActivityLogModel.cpp
     src/core/HumFilter.h
     src/core/HumFilter.cpp
+    src/core/DebugLog.h
+    src/core/DebugLog.cpp
 
     src/sdr/ISdrDevice.h
     src/sdr/RtlSdrDevice.h

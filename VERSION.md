@@ -1,10 +1,10 @@
 # Version
 
-Current version: **0.1.0**
+Current version: **0.2.0**
 
 ## Where the version is coded
 
-- `CMakeLists.txt` (line 2) — `project(SdrScanner VERSION 0.0.3 LANGUAGES CXX)`.
+- `CMakeLists.txt` (line 2) — `project(SdrScanner VERSION 0.2.0 LANGUAGES CXX)`.
   This is the source-tree fallback version (`PROJECT_VERSION`), used for local/dev
   builds when `APP_VERSION` isn't overridden.
 - `CMakeLists.txt` (`APP_VERSION` / `APP_VERSION_STRING`) — `APP_VERSION` defaults
