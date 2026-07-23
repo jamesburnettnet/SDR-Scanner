@@ -179,6 +179,11 @@ MainWindow::MainWindow(QWidget *parent)
             onDone(false, 0.0, 0.0, QStringLiteral("No SDR device open. Use Detect first."));
             return;
         }
+        if (!m_deviceManager->reopenCurrentDevice()) {
+            SDR_LOG("ui") << "Auto Tune blocked: failed to reopen device";
+            onDone(false, 0.0, 0.0, QStringLiteral("Failed to reopen SDR device."));
+            return;
+        }
 
         auto *calibrator = new SquelchCalibrator(this);
         connect(calibrator, &SquelchCalibrator::calibrationFinished, this,
@@ -252,6 +257,11 @@ void MainWindow::onExploreClicked()
         QMessageBox::warning(this, QStringLiteral("Explore"), QStringLiteral("No SDR device open. Use Detect first."));
         return;
     }
+    if (!m_deviceManager->reopenCurrentDevice()) {
+        SDR_LOG("ui") << "Explore: failed to reopen device";
+        statusBar()->showMessage(QStringLiteral("Failed to reopen SDR device."), 6000);
+        return;
+    }
 
     SDR_LOG("ui") << "Starting explore engine, sweep points=" << sweep.size();
     m_engine = new ScanEngine(this);
@@ -282,6 +292,12 @@ void MainWindow::startScan(bool explore)
     }
 
     stopScan();
+
+    if (!m_deviceManager->reopenCurrentDevice()) {
+        SDR_LOG("ui") << "startScan: failed to reopen device";
+        statusBar()->showMessage(QStringLiteral("Failed to reopen SDR device."), 6000);
+        return;
+    }
 
     SDR_LOG("ui") << "Starting scan engine, enabled frequencies=" << freqs.size();
     m_engine = new ScanEngine(this);

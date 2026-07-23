@@ -27,6 +27,12 @@ public:
     void closeDevice();
     bool isDeviceOpen() const;
 
+    // Closes and reopens the same device index via a fresh rtlsdr_open()
+    // handle. Call this before starting each new streaming session (scan,
+    // explore, or calibration) -- see the .cpp for why a reused handle
+    // isn't safe to restream on.
+    bool reopenCurrentDevice();
+
     ISdrDevice *device() const { return m_device.get(); }
     QString currentDeviceName() const { return m_currentDeviceName; }
 
@@ -40,4 +46,5 @@ private:
     QVector<SdrDeviceInfo> m_devices;
     std::unique_ptr<ISdrDevice> m_device;
     QString m_currentDeviceName;
+    int m_currentDeviceIndex = -1;
 };
