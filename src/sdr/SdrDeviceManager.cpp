@@ -50,6 +50,7 @@ bool SdrDeviceManager::openDevice(int deviceIndex)
 
     m_device = std::move(dev);
     m_currentDeviceName = m_devices[deviceIndex].name;
+    m_currentDeviceIndex = deviceIndex;
     SDR_LOG("sdr") << "openDevice: opened" << m_currentDeviceName;
     emit deviceOpened(m_currentDeviceName);
     return true;
@@ -69,4 +70,22 @@ void SdrDeviceManager::closeDevice()
 bool SdrDeviceManager::isDeviceOpen() const
 {
     return m_device && m_device->isOpen();
+}
+
+bool SdrDeviceManager::reopenCurrentDevice()
+{
+    // The vendored Windows librtlsdr backend's async-cancel path is flaky
+    // (see the comments in ScanEngine::requestStop()/onSamples()): a stop
+    // that takes many retries to land can leave the DLL's internal USB
+    // transfer state corrupted in a way that doesn't crash immediately but
+    // poisons the *next* rtlsdr_read_async() on the same handle. Closing
+    // and reopening the device forces the OS/WinUSB driver stack to rebuild
+    // that state from scratch instead of inheriting whatever a rocky
+    // cancellation left behind.
+    if (m_currentDeviceIndex < 0) {
+        emit errorOccurred(QStringLiteral("No device previously opened"));
+        return false;
+    }
+    SDR_LOG("sdr") << "reopenCurrentDevice(): reopening index" << m_currentDeviceIndex;
+    return openDevice(m_currentDeviceIndex);
 }
