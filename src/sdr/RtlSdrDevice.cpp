@@ -63,10 +63,25 @@ bool RtlSdrDevice::open(int deviceIndex)
 void RtlSdrDevice::close()
 {
     SDR_LOG("sdr") << "RtlSdrDevice::close() [thread" << QThread::currentThreadId() << "] streaming="
-                    << m_streaming.load();
+                    << m_streaming.load() << "hasStreamed=" << m_hasStreamed.load();
     stopStreaming();
     if (m_dev) {
-        rtlsdr_close(reinterpret_cast<rtlsdr_dev_t *>(m_dev));
+        if (m_hasStreamed) {
+            // librtlsdr's rtlsdr_close() calls rtlsdr_deinit_baseband(),
+            // which issues further USB control transfers on the same
+            // device -- confirmed via --debug logs (two independent
+            // repros) that this reliably crashes the vendored Windows
+            // build when called on a handle that has ever run an async
+            // streaming session, even after a single, correctly-issued,
+            // same-thread cancel with no error. Opening a *new* handle on
+            // the same device index afterwards works fine every time, so
+            // deliberately leak this handle instead of calling
+            // rtlsdr_close() on it -- the OS reclaims it when the process
+            // exits, and it doesn't block reopening the same device.
+            SDR_LOG("sdr") << "close(): device has streamed -- leaking handle instead of calling rtlsdr_close()";
+        } else {
+            rtlsdr_close(reinterpret_cast<rtlsdr_dev_t *>(m_dev));
+        }
         m_dev = nullptr;
     }
 }
@@ -138,6 +153,7 @@ bool RtlSdrDevice::startStreaming(SdrSampleCallback callback)
     m_callback = std::move(callback);
     m_streaming = true;
     m_cancelRequested = false;
+    m_hasStreamed = true;
     rtlsdr_reset_buffer(reinterpret_cast<rtlsdr_dev_t *>(m_dev));
     SDR_LOG("sdr") << "rtlsdr_read_async() entering (blocking) [thread" << QThread::currentThreadId() << "]";
     // Blocks (in the caller's thread) until stopStreaming() -> rtlsdr_cancel_async().
