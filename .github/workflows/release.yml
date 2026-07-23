@@ -214,12 +214,22 @@ jobs:
       - name: Download artifacts
         uses: actions/download-artifact@v8
 
-      - name: Publish GitHub Release
+      # GitHub's "immutable releases" only allow asset uploads before a
+      # release is published -- create it as a draft first (so each of the
+      # 4 build jobs' assets can attach), then explicitly publish it as a
+      # separate step below once everything is uploaded.
+      - name: Publish GitHub Release (draft)
         uses: softprops/action-gh-release@v2
         with:
+          draft: true
           files: |
             deb-debian13/*.deb
             deb-ubuntu26/*.deb
             rpm-package/*.rpm
             windows-zip/*.zip
           generate_release_notes: true
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "${{ github.ref_name }}" --draft=false --repo "${{ github.repository }}"
