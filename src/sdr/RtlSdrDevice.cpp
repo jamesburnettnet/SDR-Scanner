@@ -137,6 +137,7 @@ bool RtlSdrDevice::startStreaming(SdrSampleCallback callback)
     if (!m_dev) return false;
     m_callback = std::move(callback);
     m_streaming = true;
+    m_cancelRequested = false;
     rtlsdr_reset_buffer(reinterpret_cast<rtlsdr_dev_t *>(m_dev));
     SDR_LOG("sdr") << "rtlsdr_read_async() entering (blocking) [thread" << QThread::currentThreadId() << "]";
     // Blocks (in the caller's thread) until stopStreaming() -> rtlsdr_cancel_async().
@@ -152,11 +153,26 @@ bool RtlSdrDevice::startStreaming(SdrSampleCallback callback)
 
 void RtlSdrDevice::stopStreaming()
 {
-    if (m_dev && m_streaming) {
-        SDR_LOG("sdr") << "rtlsdr_cancel_async() [thread" << QThread::currentThreadId() << "]"
-                        << "-- must match the thread rtlsdr_read_async() is blocked on, or this is unsafe";
-        rtlsdr_cancel_async(reinterpret_cast<rtlsdr_dev_t *>(m_dev));
-    }
+    if (!m_dev || !m_streaming)
+        return;
+
+    // ScanEngine's onSamples() calls this once per incoming block for as
+    // long as m_streaming stays true, i.e. potentially a dozen-plus times
+    // in a row while rtlsdr_read_async() unwinds -- this used to be assumed
+    // harmless ("repeated calls just re-request cancellation"), but the
+    // vendored Windows build's rtlsdr_cancel_async() is not safe to call
+    // again while a cancel is already in flight: --debug logs showed 15-17
+    // back-to-back calls followed by a crash on the *next* rtlsdr_* call on
+    // the same handle (including plain rtlsdr_close()), the signature of
+    // heap corruption from a double-cancel/double-free inside the DLL, not
+    // a stale-handle issue. Only the first call per session actually
+    // issues the cancel; later ones are no-ops.
+    bool expected = false;
+    if (!m_cancelRequested.compare_exchange_strong(expected, true))
+        return;
+
+    SDR_LOG("sdr") << "rtlsdr_cancel_async() [thread" << QThread::currentThreadId() << "]";
+    rtlsdr_cancel_async(reinterpret_cast<rtlsdr_dev_t *>(m_dev));
 }
 
 QString RtlSdrDevice::lastError() const

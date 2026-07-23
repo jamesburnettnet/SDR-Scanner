@@ -226,10 +226,12 @@ void ScanEngine::onSamples(const std::complex<float> *samples, size_t count)
         // Cancel here, not from requestStop() on the GUI thread -- see the
         // comment there. This is the streaming callback, i.e. the only
         // thread librtlsdr documents rtlsdr_cancel_async() as safe to call
-        // from. May end up calling stopStreaming() again for a block or
-        // two more that were already in flight before the cancel takes
-        // effect; repeated calls are harmless since they just re-request
-        // cancellation on a device that's already stopping.
+        // from. May end up calling stopStreaming() again for a block or two
+        // more that were already in flight before the cancel takes effect;
+        // RtlSdrDevice::stopStreaming() itself only issues the actual
+        // rtlsdr_cancel_async() once per session, since calling it again
+        // while a cancel is already in flight corrupts the vendored Windows
+        // build's internal state (see the comment there).
         SDR_LOG("engine") << "onSamples(): stop noticed, cancelling from callback thread";
         m_device->stopStreaming();
         return;
