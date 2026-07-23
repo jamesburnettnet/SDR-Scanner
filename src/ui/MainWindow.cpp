@@ -166,6 +166,13 @@ MainWindow::MainWindow(QWidget *parent)
         statusBar()->showMessage(QStringLiteral("Device error: %1").arg(msg), 6000);
     });
 
+    // Persist on every add/edit/remove, not just on a clean exit -- saving
+    // only from the destructor/closeEvent() means any edit made during a
+    // session that later crashes (e.g. the SDR streaming crashes this app
+    // has been chasing) is silently lost even though it never touched the
+    // SDR device at all.
+    connect(m_freqTable, &FrequencyTableView::listChanged, this, &MainWindow::saveFrequencies);
+
     m_freqTable->setCalibrationHandler([this](qint64 freqHz, Modulation mod,
                                                FrequencyTableView::CalibrationResultFn onDone) {
         SDR_LOG("ui") << "Auto Tune requested, freqHz=" << freqHz;
