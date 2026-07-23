@@ -136,3 +136,88 @@ jobs:
 
       - name: Run self-test on the installed binary
         run: QT_QPA_PLATFORM=offscreen /usr/bin/sdr-scanner --test
+
+  # Qt has no distro package manager to lean on for Windows the way the
+  # Linux jobs do, so this installs Qt6 (MinGW build) and its matching
+  # MinGW-w64 13.1.0 compiler via aqtinstall -- the same tool the Qt online
+  # installer itself uses, just scriptable. The compiler version has to
+  # match what Qt's win64_mingw kit was built with (ABI compatibility, not
+  # just "any mingw will do"); librtlsdr and its headers are vendored
+  # under lib/ instead (see lib/README.md), since there's nothing to
+  # install there either.
+  build-windows:
+    name: Build (windows)
+    runs-on: windows-latest
+    env:
+      QT_VERSION: "6.9.3"
+      MINGW_TOOL: "tools_mingw1310"
+      MINGW_DIR: "mingw1310_64"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Cache Qt + MinGW toolchain
+        id: cache-qt
+        uses: actions/cache@v4
+        with:
+          path: C:\Qt
+          key: qt-${{ env.QT_VERSION }}-${{ env.MINGW_TOOL }}-v1
+
+      - name: Install aqtinstall
+        if: steps.cache-qt.outputs.cache-hit != 'true'
+        run: pip install aqtinstall
+
+      - name: Install Qt6 (MinGW)
+        if: steps.cache-qt.outputs.cache-hit != 'true'
+        run: python -m aqt install-qt windows desktop ${{ env.QT_VERSION }} win64_mingw -O C:\Qt -m qtmultimedia
+
+      - name: Install matching MinGW toolchain
+        if: steps.cache-qt.outputs.cache-hit != 'true'
+        run: python -m aqt install-tool windows desktop ${{ env.MINGW_TOOL }} -O C:\Qt
+
+      - name: Configure
+        run: |
+          $env:PATH = "C:\Qt\Tools\${{ env.MINGW_DIR }}\bin;$env:PATH"
+          cmake -S . -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_PREFIX_PATH=C:\Qt\${{ env.QT_VERSION }}\mingw_64
+
+      - name: Build
+        run: |
+          $env:PATH = "C:\Qt\Tools\${{ env.MINGW_DIR }}\bin;$env:PATH"
+          cmake --build build -j
+
+      - name: Run self-test
+        run: .\build\sdr-scanner.exe --test
+
+      - name: Package
+        run: |
+          $env:PATH = "C:\Qt\Tools\${{ env.MINGW_DIR }}\bin;$env:PATH"
+          cmake --install build --prefix dist\sdr-scanner
+          Compress-Archive -Path dist\sdr-scanner\bin\* -DestinationPath dist\sdr-scanner-windows-x64.zip
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: sdr-scanner-windows
+          path: dist\sdr-scanner-windows-x64.zip
+          if-no-files-found: error
+
+  # Same idea as test-install-linux: unpack the just-built zip on a fresh
+  # runner (no leftover Qt/MinGW/PATH from the build job) and confirm the
+  # binary runs standalone with nothing else installed.
+  test-install-windows:
+    name: Test install (windows)
+    needs: build-windows
+    runs-on: windows-latest
+    steps:
+      - name: Download package artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: sdr-scanner-windows
+          path: pkg
+
+      - name: Extract
+        run: Expand-Archive -Path pkg\sdr-scanner-windows-x64.zip -DestinationPath extracted
+
+      - name: Run self-test on the extracted binary
+        run: .\extracted\sdr-scanner.exe --test
