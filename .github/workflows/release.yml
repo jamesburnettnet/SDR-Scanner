@@ -29,6 +29,13 @@ jobs:
         run: |
           VERSION=$(git describe --tags --exact-match --match 'v*' 2>/dev/null | sed 's/^v//' || true)
           if [ -z "$VERSION" ]; then
+            # Not an exact-tag checkout, e.g. a manual workflow_dispatch run
+            # off a branch -- fall back to the version baked into
+            # CMakeLists.txt's project() declaration instead of a
+            # meaningless 0.0.0-dev placeholder.
+            VERSION=$(grep -m1 -oE 'VERSION [0-9]+\.[0-9]+\.[0-9]+' CMakeLists.txt | awk '{print $2}')
+          fi
+          if [ -z "$VERSION" ]; then
             VERSION="0.0.0-dev"
           fi
           echo "Resolved version: $VERSION"
