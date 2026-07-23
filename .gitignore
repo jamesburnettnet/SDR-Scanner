@@ -43,6 +43,8 @@
 build/
 Build/
 build-*/
+dist/
+dist-*/
 
 # CMake generated files
 CMakeFiles/
@@ -60,6 +62,10 @@ compile_commands.json
 
 # vcpkg
 vcpkg_installed/
+
+# Vendored Windows runtime deps are intentionally committed (see lib/README.md)
+!lib/win64/*.dll
+!lib/win64/*.a
 
 # debug information files
 *.dwo

@@ -58,16 +58,19 @@ for every tagged version (`v*.*.*`):
 | Debian 13 (trixie) | `sdr-scanner_<version>-1deb13_amd64.deb` |
 | Ubuntu 26.04 | `sdr-scanner_<version>-1ub2604_amd64.deb` |
 | Fedora 44 | `sdr-scanner-<version>-1.fed44.x86_64.rpm` |
+| Windows (64-bit) | `sdr-scanner-<version>-win64.zip` |
 
-Each package declares its own runtime dependencies (Qt6, librtlsdr, etc.)
-automatically via `dpkg-shlibdeps`/RPM's auto-requires, so a normal
+Each Linux package declares its own runtime dependencies (Qt6, librtlsdr,
+etc.) automatically via `dpkg-shlibdeps`/RPM's auto-requires, so a normal
 `apt install ./sdr-scanner_*.deb` or `dnf install ./sdr-scanner-*.rpm`
 resolves everything from the distro's own repos — nothing to hand-install
-first.
+first. The Windows zip is self-contained (Qt and librtlsdr DLLs included)
+— unzip it anywhere and run `sdr-scanner.exe`. Each RTL-SDR dongle still
+needs a one-time WinUSB driver bind via [Zadig](https://zadig.akeo.ie/);
+see [`lib/README.md`](lib/README.md) for why.
 
-Windows and macOS aren't packaged/built by CI right now; the source itself
-avoids Linux-specific APIs, so building from source may still work there,
-just untested.
+macOS isn't packaged/built by CI; the source itself avoids Linux-specific
+APIs, so building from source may still work there, just untested.
 
 ```bash
 # Debian 13 / Ubuntu 26.04
@@ -110,6 +113,43 @@ cmake --build build -j
 ```
 
 Run: `./build/sdr-scanner`.
+
+**Windows (MinGW):**
+
+librtlsdr and its headers are vendored under `lib/` (see
+[`lib/README.md`](lib/README.md) for what's there and why), so nothing
+needs to be installed for that part. Qt6 itself does, and it has to be the
+**MinGW** build (Qt's MSVC builds use an incompatible ABI for a MinGW-built
+app) — MinGW-w64 GCC **13.1.0** is the version this was built and tested
+against, since it's the toolchain Qt's own official MinGW kit bundles, and
+CMake's MinGW `find_library` logic needs that same kind of toolchain to
+resolve `lib/win64/librtlsdr.dll.a`.
+
+The easiest way to get a matching Qt6 + MinGW pair is
+[aqtinstall](https://github.com/miurahr/aqtinstall) (`pip install
+aqtinstall`), which installs the same official binaries as the Qt online
+installer without needing a Qt account:
+
+```powershell
+python -m aqt install-qt windows desktop 6.9.3 win64_mingw -O C:\Qt -m qtmultimedia
+python -m aqt install-tool windows desktop tools_mingw1310 -O C:\Qt
+```
+
+Then, with `C:\Qt\Tools\mingw1310_64\bin` and CMake/Ninja on `PATH`:
+
+```powershell
+cmake -S . -B build-win -G Ninja -DCMAKE_BUILD_TYPE=Release `
+      -DCMAKE_PREFIX_PATH=C:\Qt\6.9.3\mingw_64
+cmake --build build-win -j
+```
+
+The build automatically copies `librtlsdr.dll` next to the exe and runs
+`windeployqt` to pull in the Qt DLLs, so `build-win\sdr-scanner.exe` is
+runnable as-is. To produce a standalone folder you can zip up and hand to
+someone else, `cmake --install build-win --prefix dist` instead (this is
+what CI does to build the release zip). Each RTL-SDR dongle needs a
+one-time driver rebind to WinUSB via [Zadig](https://zadig.akeo.ie/) first;
+see `lib/README.md` for why.
 
 ### Building a package locally
 

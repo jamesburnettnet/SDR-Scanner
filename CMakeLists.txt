@@ -24,27 +24,40 @@ endif()
 find_package(Qt6 REQUIRED COMPONENTS Widgets Multimedia)
 
 # --- librtlsdr discovery -----------------------------------------------
-# Works with the Debian/Ubuntu package (librtlsdr-dev) and Homebrew on
-# macOS, both plain pkg-config + headers/lib with no CMake package config.
-# (Windows/vcpkg support was removed -- vcpkg's rtlsdr port needs a
-# different discovery mechanism entirely (a CMake package config, not
-# find_path/find_library) and was never gotten working reliably in CI.)
-find_package(PkgConfig QUIET)
-if(PkgConfig_FOUND)
-    pkg_check_modules(PC_RTLSDR QUIET librtlsdr)
+# Linux/macOS: works with the Debian/Ubuntu package (librtlsdr-dev) and
+# Homebrew on macOS, both plain pkg-config + headers/lib with no CMake
+# package config.
+# Windows/MinGW: no system package manager to rely on, so the prebuilt
+# librtlsdr.dll (mingw-w64 build), its generated MinGW import library
+# (librtlsdr.dll.a), and the headers are vendored under lib/ instead --
+# see lib/README.md for provenance. libusb is statically linked into that
+# DLL (WinUSB backend), so there is no separate libusb DLL to find.
+if(WIN32)
+    set(RTLSDR_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/lib/include")
+    find_library(RTLSDR_LIBRARY
+        NAMES rtlsdr librtlsdr
+        HINTS "${CMAKE_SOURCE_DIR}/lib/win64"
+        NO_DEFAULT_PATH
+    )
+    set(RTLSDR_RUNTIME_DLL "${CMAKE_SOURCE_DIR}/lib/win64/librtlsdr.dll")
+else()
+    find_package(PkgConfig QUIET)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(PC_RTLSDR QUIET librtlsdr)
+    endif()
+
+    find_path(RTLSDR_INCLUDE_DIR
+        NAMES rtl-sdr.h
+        HINTS ${PC_RTLSDR_INCLUDE_DIRS}
+    )
+    find_library(RTLSDR_LIBRARY
+        NAMES rtlsdr librtlsdr
+        HINTS ${PC_RTLSDR_LIBRARY_DIRS}
+    )
 endif()
 
-find_path(RTLSDR_INCLUDE_DIR
-    NAMES rtl-sdr.h
-    HINTS ${PC_RTLSDR_INCLUDE_DIRS}
-)
-find_library(RTLSDR_LIBRARY
-    NAMES rtlsdr librtlsdr
-    HINTS ${PC_RTLSDR_LIBRARY_DIRS}
-)
-
 if(NOT RTLSDR_INCLUDE_DIR OR NOT RTLSDR_LIBRARY)
-    message(FATAL_ERROR "librtlsdr not found. Install librtlsdr-dev (Linux) or 'brew install librtlsdr' (macOS).")
+    message(FATAL_ERROR "librtlsdr not found. Install librtlsdr-dev (Linux), 'brew install librtlsdr' (macOS), or check lib/include + lib/win64 (Windows).")
 endif()
 
 message(STATUS "librtlsdr include: ${RTLSDR_INCLUDE_DIR}")
@@ -120,10 +133,53 @@ target_link_libraries(sdr-scanner PRIVATE
 # a release build's title matches the tag it was built from.
 target_compile_definitions(sdr-scanner PRIVATE APP_VERSION_STRING="${APP_VERSION}")
 
+# --- Windows runtime deployment ---------------------------------------------
+# Makes the build output directly runnable: copies librtlsdr.dll next to the
+# exe, then (if windeployqt is available next to the Qt6 CMake config, which
+# it is for both the official mingw kit and aqtinstall) runs it to pull in
+# the Qt6 DLLs, platform plugin, and multimedia backend the same way it
+# would for any other Qt/MinGW app.
+if(WIN32)
+    add_custom_command(TARGET sdr-scanner POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${RTLSDR_RUNTIME_DLL}" "$<TARGET_FILE_DIR:sdr-scanner>"
+    )
+
+    find_program(WINDEPLOYQT_EXECUTABLE
+        NAMES windeployqt windeployqt6
+        HINTS "${Qt6_DIR}/../../../bin"
+    )
+    if(WINDEPLOYQT_EXECUTABLE)
+        add_custom_command(TARGET sdr-scanner POST_BUILD
+            COMMAND "${WINDEPLOYQT_EXECUTABLE}" --no-translations "$<TARGET_FILE:sdr-scanner>"
+        )
+    else()
+        message(WARNING "windeployqt not found next to Qt6; run it manually to bundle the Qt DLLs.")
+    endif()
+endif()
+
 # --- Install ---------------------------------------------------------------
 include(GNUInstallDirs)
 
 install(TARGETS sdr-scanner RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+if(WIN32)
+    install(FILES "${RTLSDR_RUNTIME_DLL}" DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+    # Also run windeployqt against the *installed* exe (as opposed to the
+    # POST_BUILD copy above, which only serves the build/ dir for local
+    # dev iteration) so `cmake --install` alone produces a self-contained,
+    # zip-and-ship folder -- this is what CI uses to stage the release
+    # artifact, and it's the same thing a developer would want from a
+    # local `cmake --install` on Windows, where there's no CPack/DEB/RPM
+    # package to fall back on.
+    if(WINDEPLOYQT_EXECUTABLE)
+        install(CODE "
+            execute_process(COMMAND \"${WINDEPLOYQT_EXECUTABLE}\" --no-translations
+                \"\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/sdr-scanner.exe\")
+        ")
+    endif()
+endif()
 
 if(UNIX AND NOT APPLE)
     install(FILES resources/sdr-scanner.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
