@@ -23,6 +23,7 @@ public:
     void clear();
 
     bool isSequential() const override { return true; }
+    qint64 bytesAvailable() const override;
 
 protected:
     qint64 readData(char *data, qint64 maxSize) override;
@@ -53,7 +54,10 @@ public:
     void pushAudio(const std::vector<float> &samples);
 
 private:
+    void reopen(); // stop() + start(), used to recover from a dead sink
+
     std::unique_ptr<QAudioSink> m_sink;
     AudioRingBuffer m_ringBuffer;
     bool m_muted = false;
+    double m_volume = 0.8;
 };
